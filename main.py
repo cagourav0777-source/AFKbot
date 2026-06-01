@@ -464,16 +464,7 @@ remove your AFK status when you return!
 
 Let's get started! 🚀
 """
-    
-    # Edit message with photo
-    await query.message.edit_media(
-        media=InputMediaPhoto(
-            media="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-            caption=text
-        ),
-        reply_markup=keyboard
-    )
-    
+ 
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
 async def afk_handler(_, message: Message):
