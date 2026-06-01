@@ -1363,7 +1363,37 @@ async def auto_delete_callback(_, query: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in auto-delete callback: {e}")
         await query.answer("An error occurred. Please try again.", show_alert=True)
+# Add this RIGHT BEFORE the main() function definition (around line 1366)
+async def init_handlers():
+    """Ensure all handlers are properly registered"""
+    logger.info("Initializing command handlers...")
+    # Force handler registration
+    await asyncio.sleep(0.5)
+    logger.info("Handlers initialized successfully")
 
+# Modify main() function:
+async def main():
+    # Create downloads directory if not exists
+    os.makedirs("downloads", exist_ok=True)
+    logger.info("Created downloads directory")
+    
+    # Initialize handlers FIRST
+    await init_handlers()  # ADD THIS LINE
+    
+    # Start auto-delete background task
+    asyncio.create_task(auto_delete_loop())
+    
+    # Start Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask server started on port {PORT}")
+    
+    # Start the Telegram bot
+    await app.start()
+    logger.info("Telegram bot is now running...")
+    
+    # Keep the bot running
+    await idle()
 # Main execution
 async def main():
     # Create downloads directory if not exists
