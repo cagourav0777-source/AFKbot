@@ -1266,7 +1266,7 @@ async def auto_delete_menu(_, message: Message):
     try:
         member = await app.get_chat_member(chat_id, message.from_user.id)
         if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-            await message.reply_text("❌ You must be an admin to configure auto-delete settings")
+            await message.reply_text("Administrator access is required to manage auto-delete settings 🔒")
             return
     except Exception as e:
         logger.error(f"Admin check error: {e}")
@@ -1301,7 +1301,7 @@ async def auto_delete_callback(_, query: CallbackQuery):
         try:
             member = await app.get_chat_member(chat_id, query.from_user.id)
             if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                await query.answer("❌ You must be an admin to use this", show_alert=True)
+                await query.answer("Administrator access is required to use this", show_alert=True)
                 return
         except Exception as e:
             logger.error(f"Admin check error: {e}")
