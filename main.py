@@ -311,7 +311,7 @@ class Bot(Client):
             in_memory=True
         )
     
- async def start(self):
+    async def start(self):
         await super().start()
         logger.info("Bot client started successfully")
         
