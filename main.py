@@ -398,12 +398,7 @@ remove your AFK status when you return!
 
 Let's get started! 🚀
 """
-        
-  # Send photo with caption and buttons
-    sent_msg = await message.reply_photo(
-        photo="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-        reply_markup=keyboard
-    )
+
     await track_message_for_deletion(sent_msg)
 
 # Help callback handler
