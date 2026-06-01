@@ -399,8 +399,6 @@ remove your AFK status when you return!
 Let's get started! 🚀
 """
 
-    await track_message_for_deletion(sent_msg)
-
 # Help callback handler
 @app.on_callback_query(filters.regex("^help$"))
 async def help_callback(_, query):
