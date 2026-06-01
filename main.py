@@ -311,20 +311,29 @@ class Bot(Client):
             in_memory=True
         )
     
-    async def start(self):
-        await super().start()
-        logger.info("Bot client started successfully")
-        
-        # Send startup notification to owner
-        if OWNER_ID:
-            try:
-                await self.send_message(
-                    OWNER_ID,
-                    "✅ AFK Bot Started Successfully!\n"
-                    f"🤖 Username: @{BOT_USERNAME}"
-                )
-            except Exception as e:
-                logger.error(f"Startup notification failed: {e}")
+   async def start(self):
+    await super().start()
+    logger.info("✅ Bot client started successfully")
+    
+    # Verify bot is working
+    try:
+        me = await self.get_me()
+        logger.info(f"✅ Bot verified: @{me.username} (ID: {me.id})")
+    except Exception as e:
+        logger.error(f"❌ Failed to verify bot: {e}")
+    
+    # Send startup notification to owner
+    if OWNER_ID:
+        try:
+            await self.send_message(
+                OWNER_ID,
+                f"✅ **AFK Bot Started Successfully!**\n"
+                f"🤖 Username: @{BOT_USERNAME}\n"
+                f"⏰ Time: {datetime.now()}"
+            )
+            logger.info(f"✅ Startup notification sent to {OWNER_ID}")
+        except Exception as e:
+            logger.error(f"❌ Startup notification failed: {e}")
     
     async def stop(self):
         await super().stop()
@@ -352,37 +361,41 @@ async def new_chat_members(_, message: Message):
 # Start command handler with new image and message
 @app.on_message(filters.command(["start", "help"]))
 async def start_command(_, message: Message):
-    user = message.from_user
-    uptime = get_readable_time(int(time.time() - BOT_START_TIME))
-    
-    # Track group if in a group
-    if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await track_group(
-            message.chat.id,
-            message.chat.title
-        )
-        # Initialize auto-delete settings if not exists
-        await init_group_auto_delete_settings(message.chat.id)
-    
-    # Add user to database for stats
-    if user:
-        await add_user(user.id, user.first_name or "", user.username or "")
-    
-    keyboard = InlineKeyboardMarkup(
-        [
+    try:
+        user = message.from_user
+        if not user:
+            logger.warning("No user found in message")
+            return
+            
+        uptime = get_readable_time(int(time.time() - BOT_START_TIME))
+        
+        # Track group if in a group
+        if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            await track_group(
+                message.chat.id,
+                message.chat.title
+            )
+            await init_group_auto_delete_settings(message.chat.id)
+        
+        # Add user to database for stats
+        if user:
+            await add_user(user.id, user.first_name or "", user.username or "")
+        
+        keyboard = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton(
-                    "➕ Add to Group ➕",
-                    url=f"https://t.me/{BOT_USERNAME}?startgroup=true",
-                )
-            ],
-            [
-                InlineKeyboardButton("Help ❓", callback_data="help"),
+                [
+                    InlineKeyboardButton(
+                        "➕ Add to Group ➕",
+                        url=f"https://t.me/{BOT_USERNAME}?startgroup=true",
+                    )
+                ],
+                [
+                    InlineKeyboardButton("Help ❓", callback_data="help"),
+                ]
             ]
-        ]
-    )
-    
-    text = f"""
+        )
+        
+        text = f"""
 ╔══════════════════════════════════╗
 ║  🤖 AFK ADVANCE BOT 🤖          ║
 ║  Your Smart Away Status Manager  ║
@@ -394,18 +407,25 @@ I'm your personal AFK (Away From Keyboard) status manager.
 I'll notify everyone when you're away and automatically 
 remove your AFK status when you return!
 
-━━━━━━━━━━━━━��━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Let's get started! 🚀
 """
-    
-    # Send text with caption and buttons
-    sent_msg = await message.reply_text(
-        text=text,
-        caption=text,
-        reply_markup=keyboard
-    )
-    await track_message_for_deletion(sent_msg)
+        
+        # Send text with caption and buttons
+        sent_msg = await message.reply_text(
+            text=text,
+            reply_markup=keyboard
+        )
+        logger.info(f"✅ /start command sent to {user.id} ({user.first_name})")
+        await track_message_for_deletion(sent_msg)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in start_command: {e}", exc_info=True)
+        try:
+            await message.reply_text(f"❌ Error: {str(e)}")
+        except:
+            pass
 
 # Help callback handler
 @app.on_callback_query(filters.regex("^help$"))
