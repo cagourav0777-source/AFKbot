@@ -402,14 +402,6 @@ async def start_command(_, message: Message):
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Let's get started! 🚀"
     )
-
-    try:
-        await message.reply_photo(
-            photo="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-            caption=text,
-            reply_markup=keyboard,
-        )
-    except Exception:
         await message.reply_text(text, reply_markup=keyboard)
 
 # Help callback handler
@@ -476,20 +468,7 @@ async def back_callback(_, query: CallbackQuery):
         "━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━\n\n"
         "Let's get started! 🚀"
     )
-
-    try:
-        await query.message.edit_media(
-            media=InputMediaPhoto(
-                media="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-                caption=text,
-            ),
-            reply_markup=keyboard,
-        )
-    except Exception:
-        try:
-            await query.message.edit_text(text, reply_markup=keyboard)
-        except Exception:
-            await query.message.reply_text(text, reply_markup=keyboard)
+     await message.reply_text(text, reply_markup=keyboard)
 
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
@@ -542,9 +521,10 @@ async def afk_handler(_, message: Message):
             reasonafk = reasondb.get("reason", None)
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"**{user.first_name}** is now available again after {seenago}"
+            base_text = f"🌟 **Welcome Back!**\n\n**{user.first_name}** has returned after being AFK for {seenago}"
             if reasonafk:
-                base_text += f"\n\nReason: `{reasonafk}`"
+                base_text += f"\n\n📝 **AFK Reason:** `{reasonafk}`"
+            base_text += "\n\n✅ Status: **Online**"
 
             # Prefer sending stored file_id if available. If photo type used local file, fallback to file path.
             if afktype == "animation" and data:
