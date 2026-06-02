@@ -58,9 +58,9 @@ groups_collection = db.groups
 broadcast_collection = db.broadcast_tmp
 auto_delete_collection = db.auto_delete
 afk_stats_collection = db.afk_stats
-achievements_collection = db.achievements  # ✅ NEW: Achievements tracking
-global_king_collection = db.global_king  # ✅ NEW: Global King tracking
-group_king_collection = db.group_king  # ✅ NEW: Group King tracking
+achievements_collection = db.achievements
+global_king_collection = db.global_king
+group_king_collection = db.group_king
 
 # Helper functions
 def get_readable_time(seconds: int) -> str:
@@ -81,7 +81,7 @@ def get_readable_time(seconds: int) -> str:
 def generate_random_id(length=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
-# ✅ NEW: Achievement System
+# Achievement System
 ACHIEVEMENTS = {
     "first_afk": {"emoji": "🎉", "name": "First AFK", "description": "Set AFK for the first time"},
     "hour_master": {"emoji": "⏰", "name": "Hour Master", "description": "1 hour straight AFK"},
@@ -162,7 +162,7 @@ async def get_user_achievements(user_id: int):
         logger.error(f"Error getting achievements: {e}")
         return []
 
-# ✅ NEW: AFK King/Queen System
+# AFK King/Queen System
 async def update_global_king(user_id: int, user_name: str):
     """Update global AFK King"""
     try:
@@ -705,46 +705,91 @@ async def afk_achievements_command(_, message: Message):
             text += f"   <i>{ach['description']}</i>\n\n"
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 My Records", callback_data=f"my_records_{user_id}")]
+        [InlineKeyboardButton("📊 My Records", callback_data=f"view_my_records_{user_id}")]
     ])
     
     sent_msg = await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
     await track_message_for_deletion(sent_msg)
 
-# ✅ NEW: My Records Command
-@app.on_callback_query(filters.regex(r"^my_records_"))
-async def my_records_callback(_, query: CallbackQuery):
-    """Show personal AFK records"""
+# ✅ FIXED: View My Records callback
+@app.on_callback_query(filters.regex(r"^view_my_records_"))
+async def view_my_records_callback(_, query: CallbackQuery):
+    """Show personal AFK records from achievements view"""
     await query.answer()
-    user_id = query.from_user.id
-    user_name = query.from_user.first_name or "User"
-    
-    user_data = await users_collection.find_one({"user_id": user_id})
-    afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
-    
-    total_afk = user_data.get("total_afk_time", 0) if user_data else 0
-    highest_afk = afk_stats.get("highest_afk", 0) if afk_stats else 0
-    total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
-    avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
-    
-    text = (
-        f"📊 <b>{user_name}'s AFK Records</b>\n"
-        f"{'─' * 40}\n\n"
-        f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
-        f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
-        f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
-        f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
-    )
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏅 Achievements", callback_data=f"view_ach_{user_id}")]
-    ])
-    
     try:
+        user_id = int(query.data.split("_")[-1])
+        user_name = query.from_user.first_name or "User"
+        
+        user_data = await users_collection.find_one({"user_id": user_id})
+        afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+        
+        total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+        highest_afk = afk_stats.get("highest_afk", 0) if afk_stats else 0
+        total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+        avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
+        
+        text = (
+            f"📊 <b>{user_name}'s AFK Records</b>\n"
+            f"{'─' * 40}\n\n"
+            f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
+            f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
+            f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
+            f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
+        )
+        
+        unlocked = await get_user_achievements(user_id)
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏅 Back to Achievements", callback_data=f"back_to_achievements_{user_id}")],
+            [InlineKeyboardButton("❌ Close", callback_data="close_message")]
+        ])
+        
         await query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
-    except Exception:
-        await query.answer("Updated", show_alert=False)
+    except Exception as e:
+        logger.error(f"Error in view_my_records_callback: {e}")
+        await query.answer("❌ Error loading records", show_alert=True)
 
+# ✅ FIXED: Back to Achievements callback
+@app.on_callback_query(filters.regex(r"^back_to_achievements_"))
+async def back_to_achievements_callback(_, query: CallbackQuery):
+    """Back to achievements view"""
+    await query.answer()
+    try:
+        user_id = int(query.data.split("_")[-1])
+        user_name = query.from_user.first_name or "User"
+        
+        unlocked_achievements = await get_user_achievements(user_id)
+        
+        text = f"🏅 <b>{user_name}'s Achievements</b>\n\n"
+        text += f"Total Unlocked: <code>{len(unlocked_achievements)}</code>\n\n"
+        
+        for achievement_key in unlocked_achievements:
+            if achievement_key in ACHIEVEMENTS:
+                ach = ACHIEVEMENTS[achievement_key]
+                text += f"{ach['emoji']} <b>{ach['name']}</b>\n"
+                text += f"   <i>{ach['description']}</i>\n\n"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 My Records", callback_data=f"view_my_records_{user_id}")],
+            [InlineKeyboardButton("❌ Close", callback_data="close_message")]
+        ])
+        
+        await query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Error in back_to_achievements_callback: {e}")
+        await query.answer("❌ Error", show_alert=True)
+
+# ✅ Close message callback
+@app.on_callback_query(filters.regex("^close_message$"))
+async def close_message_callback(_, query: CallbackQuery):
+    """Close the message"""
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+# ✅ NEW: My Records Command (Direct)
 @app.on_message(filters.command("my_records"))
 async def my_records_command(_, message: Message):
     """Show personal AFK records"""
@@ -769,11 +814,81 @@ async def my_records_command(_, message: Message):
     )
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏅 Achievements", callback_data=f"view_ach_{user_id}")]
+        [InlineKeyboardButton("🏅 My Achievements", callback_data=f"show_achievements_{user_id}")],
+        [InlineKeyboardButton("❌ Close", callback_data="close_message")]
     ])
     
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
     await track_message_for_deletion(sent_msg)
+
+# ✅ Show achievements from my_records
+@app.on_callback_query(filters.regex(r"^show_achievements_"))
+async def show_achievements_callback(_, query: CallbackQuery):
+    """Show achievements from my_records"""
+    await query.answer()
+    try:
+        user_id = int(query.data.split("_")[-1])
+        user_name = query.from_user.first_name or "User"
+        
+        unlocked_achievements = await get_user_achievements(user_id)
+        
+        if not unlocked_achievements:
+            text = f"📭 <b>{user_name}</b>, you haven't unlocked any achievements yet!"
+        else:
+            text = f"🏅 <b>{user_name}'s Achievements</b>\n\n"
+            text += f"Total Unlocked: <code>{len(unlocked_achievements)}</code>\n\n"
+            
+            for achievement_key in unlocked_achievements:
+                if achievement_key in ACHIEVEMENTS:
+                    ach = ACHIEVEMENTS[achievement_key]
+                    text += f"{ach['emoji']} <b>{ach['name']}</b>\n"
+                    text += f"   <i>{ach['description']}</i>\n\n"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 Back to Records", callback_data=f"back_to_records_{user_id}")],
+            [InlineKeyboardButton("❌ Close", callback_data="close_message")]
+        ])
+        
+        await query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Error in show_achievements_callback: {e}")
+        await query.answer("❌ Error", show_alert=True)
+
+# ✅ Back to Records from achievements
+@app.on_callback_query(filters.regex(r"^back_to_records_"))
+async def back_to_records_callback(_, query: CallbackQuery):
+    """Back to records from achievements"""
+    await query.answer()
+    try:
+        user_id = int(query.data.split("_")[-1])
+        user_name = query.from_user.first_name or "User"
+        
+        user_data = await users_collection.find_one({"user_id": user_id})
+        afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+        
+        total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+        highest_afk = afk_stats.get("highest_afk", 0) if afk_stats else 0
+        total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+        avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
+        
+        text = (
+            f"📊 <b>{user_name}'s AFK Records</b>\n"
+            f"{'─' * 40}\n\n"
+            f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
+            f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
+            f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
+            f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏅 My Achievements", callback_data=f"show_achievements_{user_id}")],
+            [InlineKeyboardButton("❌ Close", callback_data="close_message")]
+        ])
+        
+        await query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Error in back_to_records_callback: {e}")
+        await query.answer("❌ Error", show_alert=True)
 
 # ✅ NEW: Global AFK King Command
 @app.on_message(filters.command("afk_king"))
