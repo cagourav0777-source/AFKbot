@@ -610,7 +610,7 @@ async def afk_handler(_, message: Message):
 
     # Save AFK status to database
     await add_afk(user_id, details)
-    response = f"**{user.first_name}** is now AFK"
+    response = f"**{user.first_name}** is now away from keyboard🚶"
     if details.get("reason"):
         response += f"\n\nReason: `{details['reason']}`"
     sent_msg = await message.reply_text(response)
@@ -659,7 +659,7 @@ async def afk_watcher(_, message: Message):
             reasonafk = reasondb.get("reason")
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"**{user_name}** is now available again after {seenago}"
+            base_text = f"🌟 **Welcome Back!**\n\n**{user_name}** is now available again after {seenago}"
             if reasonafk:
                 base_text += f"\n\nReason: `{reasonafk}`"
 
@@ -679,7 +679,7 @@ async def afk_watcher(_, message: Message):
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return watcher: {e}")
-            sent_msg = await message.reply_text(f"**{user_name}** is active again")
+            sent_msg = await message.reply_text(f"**{user_name}** is now available again")
             await track_message_for_deletion(sent_msg)
 
     # Check if replying to AFK user
@@ -695,7 +695,7 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"**{replied_user.first_name}** is AFK since {seenago}"
+                base_text = f"**{replied_user.first_name}** has been away for💤 {seenago}"
                 if reasonafk:
                     base_text += f"\n\nReason: `{reasonafk}`"
 
