@@ -57,6 +57,7 @@ users_collection = db.users  # For user stats
 groups_collection = db.groups  # For tracking groups
 broadcast_collection = db.broadcast_tmp  # For temporary broadcast data
 auto_delete_collection = db.auto_delete  # For auto-delete settings and messages
+afk_stats_collection = db.afk_stats  # ✅ NEW: For tracking highest AFK per user
 
 # Helper functions
 def get_readable_time(seconds: int) -> str:
@@ -123,6 +124,58 @@ async def update_user_afk_time(user_id: int, additional_seconds: int):
         {"$inc": {"total_afk_time": additional_seconds}},
         upsert=True
     )
+
+# ✅ NEW: Store and get highest AFK duration
+async def store_afk_duration(user_id: int, afk_duration: int):
+    """
+    Store the AFK duration and update highest AFK if this is higher
+    """
+    try:
+        user_afk = await afk_stats_collection.find_one({"user_id": user_id})
+        
+        if user_afk:
+            # User exists - update if this AFK is higher
+            if afk_duration > user_afk.get("highest_afk", 0):
+                await afk_stats_collection.update_one(
+                    {"user_id": user_id},
+                    {
+                        "$set": {
+                            "highest_afk": afk_duration,
+                            "last_updated": datetime.utcnow()
+                        }
+                    }
+                )
+        else:
+            # New user - create entry
+            await afk_stats_collection.insert_one({
+                "user_id": user_id,
+                "highest_afk": afk_duration,
+                "total_afks": 1,
+                "created_at": datetime.utcnow(),
+                "last_updated": datetime.utcnow()
+            })
+        
+        logger.info(f"Stored AFK duration {afk_duration}s for user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error storing AFK duration: {e}")
+        return False
+
+
+async def get_highest_afk_duration(user_id: int) -> int:
+    """
+    Get the highest AFK duration for a user
+    Returns the duration in seconds
+    """
+    try:
+        user_afk = await afk_stats_collection.find_one({"user_id": user_id})
+        
+        if user_afk:
+            return user_afk.get("highest_afk", 0)
+        return 0
+    except Exception as e:
+        logger.error(f"Error getting highest AFK: {e}")
+        return 0
 
 async def get_top_afk_users(limit=10):
     cursor = users_collection.find({"total_afk_time": {"$gt": 0}}).sort("total_afk_time", -1).limit(limit)
@@ -484,6 +537,51 @@ async def back_callback(_, query: CallbackQuery):
             reply_markup=keyboard,
             disable_web_page_preview=True
          )
+
+# ✅ NEW: Handle "View Highest AFK" button callback
+@app.on_callback_query(filters.regex(r"^view_highest_afk_"))
+async def view_highest_afk_callback(_, query: CallbackQuery):
+    """Handle the 'View Highest AFK' button click"""
+    try:
+        user_id = query.from_user.id
+        user_name = query.from_user.first_name or "User"
+        
+        # Get the highest AFK duration from database
+        highest_afk = await get_highest_afk_duration(user_id)
+        
+        if highest_afk > 0:
+            # Convert seconds to readable format
+            readable_time = get_readable_time(highest_afk)
+            response_text = (
+                f"📊 **{user_name}'s AFK Statistics**\n\n"
+                f"⏱️ **Highest AFK Duration:** `{readable_time}`\n\n"
+                f"⌛ **Duration in Seconds:** `{highest_afk}s`"
+            )
+        else:
+            response_text = (
+                f"📊 **{user_name}'s AFK Statistics**\n\n"
+                f"❌ No AFK records found yet.\n"
+                f"Go AFK first to create a record!"
+            )
+        
+        # Remove the loading state
+        await query.answer()
+        
+        # Edit the message to show the stats
+        await query.message.edit_text(
+            text=response_text,
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"User {user_id} viewed their highest AFK")
+        
+    except Exception as e:
+        logger.error(f"Error in view_highest_afk_callback: {e}")
+        # Show error message
+        await query.answer(
+            f"❌ Error fetching AFK stats", 
+            show_alert=True
+        )
         
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
@@ -526,6 +624,10 @@ async def afk_handler(_, message: Message):
             afk_duration = int(time.time() - float(afk_start))
         except Exception:
             afk_duration = 0
+        
+        # ✅ Store the AFK duration
+        await store_afk_duration(user_id, afk_duration)
+        
         await update_user_afk_time(user_id, afk_duration)
         await remove_afk(user_id)
 
@@ -541,21 +643,27 @@ async def afk_handler(_, message: Message):
                 base_text += f"\n\n📝 **AFK Reason:** `{reasonafk}`"
             base_text += "\n\n✅ Status: **Online**"
 
+            # ✅ Create inline keyboard with button
+            keyboard = [
+                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             # Prefer sending stored file_id if available. If photo type used local file, fallback to file path.
             if afktype == "animation" and data:
-                sent_msg = await message.reply_animation(data, caption=base_text)
+                sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
             elif afktype == "photo":
                 # if data exists (file_id), use it; else use local file download path
                 if data:
-                    sent_msg = await message.reply_photo(photo=data, caption=base_text)
+                    sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
                 else:
                     local_path = f"downloads/{user_id}.jpg"
                     if os.path.exists(local_path):
-                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
+                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
                     else:
-                        sent_msg = await message.reply_text(base_text)
+                        sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             else:
-                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
+                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return: {e}")
@@ -649,6 +757,10 @@ async def afk_watcher(_, message: Message):
             afk_duration = int(time.time() - float(afk_start))
         except Exception:
             afk_duration = 0
+        
+        # ✅ Store the AFK duration
+        await store_afk_duration(userid, afk_duration)
+        
         await update_user_afk_time(userid, afk_duration)
         await remove_afk(userid)
 
@@ -663,19 +775,25 @@ async def afk_watcher(_, message: Message):
             if reasonafk:
                 base_text += f"\n\nReason: `{reasonafk}`"
 
+            # ✅ Create inline keyboard with button
+            keyboard = [
+                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             if afktype == "animation" and data:
-                sent_msg = await message.reply_animation(data, caption=base_text)
+                sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
             elif afktype in ("photo", "sticker"):
                 if data:
-                    sent_msg = await message.reply_photo(photo=data, caption=base_text)
+                    sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
                 else:
                     local_path = f"downloads/{userid}.jpg"
                     if os.path.exists(local_path):
-                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
+                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
                     else:
-                        sent_msg = await message.reply_text(base_text)
+                        sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             else:
-                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
+                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return watcher: {e}")
