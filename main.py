@@ -402,7 +402,6 @@ async def start_command(_, message: Message):
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Let's get started! 🚀"
     )
-        await message.reply_text(text, reply_markup=keyboard)
 
 # Help callback handler
 @app.on_callback_query(filters.regex("^help$"))
