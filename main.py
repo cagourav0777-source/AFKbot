@@ -391,10 +391,10 @@ async def start_command(_, message: Message):
     )
 
     text = (
-        "╔══════════════════════════════════╗\n"
-        "║  🤖 AFK ADVANCE BOT 🤖          ║\n"
-        "║  Your Smart Away Status Manager  ║\n"
-        "╚══════════════════════════════════╝\n\n"
+        "╔═══════════════════════════╗\n"
+        "║  🤖 AFK ADVANCE BOT 🤖   ║\n"
+        "║ Smart Away Status Manager ║\n"
+        "╚═══════════════════════════╝\n\n"
         f"👋 **Welcome {user.first_name}!**\n\n"
         "I'm your personal AFK (Away From Keyboard) status manager. \n"
         "I'll notify everyone when you're away and automatically \n"
@@ -430,17 +430,11 @@ async def help_callback(_, query: CallbackQuery):
         "- /topafk - Display the Top users with the highest AFK duration"
     )
 
-    try:
-        await query.message.edit_text(
-            help_text,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("◀️ Back", callback_data="back_to_start")]]
-            ),
-            disable_web_page_preview=True,
-        )
-    except Exception:
-        # fallback to answer
-        await query.answer("Help shown", show_alert=True)
+    await message.reply_text(
+         text,
+         reply_markup=keyboard,
+         disable_web_page_preview=True
+    )
 
 # Back to start callback handler
 @app.on_callback_query(filters.regex("^back_to_start$"))
@@ -465,10 +459,10 @@ async def back_callback(_, query: CallbackQuery):
     )
 
     text = (
-        "╔══════════════════════════════════╗\n"
-        "║  🤖 AFK ADVANCE BOT 🤖          ║\n"
-        "║  Your Smart Away Status Manager  ║\n"
-        "╚══════════════════════════════════╝\n\n"
+        "╔═════════════════════════════╗\n"
+        "║  🤖 AFK ADVANCE BOT 🤖     ║\n"
+        "║   Smart Away Status Manager ║\n"
+        "╚═════════════════════════════╝\n\n"
         f"👋 **Welcome {user.first_name}!**\n\n"
         "I'm your personal AFK (Away From Keyboard) status manager. \n"
         "I'll notify everyone when you're away and automatically \n"
@@ -478,20 +472,18 @@ async def back_callback(_, query: CallbackQuery):
     )
 
     try:
-        await query.message.edit_media(
-            media=InputMediaPhoto(
-                media="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-                caption=text,
-            ),
+        await query.message.edit_text(
+            text,
             reply_markup=keyboard,
+            disable_web_page_preview=True
         )
     except Exception:
-        try:
-            await query.message.edit_text(text, reply_markup=keyboard)
-        except Exception:
-            await query.message.reply_text(text, reply_markup=keyboard)
-
-
+        await query.message.reply_text(
+            text,
+            reply_markup=keyboard,
+            disable_web_page_preview=True
+         )
+        
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
 async def afk_handler(_, message: Message):
