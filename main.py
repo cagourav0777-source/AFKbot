@@ -614,11 +614,9 @@ async def help_callback(_, query: CallbackQuery):
         "**🔔 AFK COMMANDS:**\n"
         "- /stats - View bot statistics\n"
         "- /topafk - Top 10 AFK users globally\n"
-        "- /afk_achievements - Your achievements 🏅\n"
-        "- /my_records - Your personal AFK records 📊\n"
+        "- /my_records - Your personal AFK records & achievements 🏅\n"
         "- /afk_king - Global AFK King 👑\n"
         "- /group_king - Group AFK King 🏆\n"
-        "- /leaderboard - Group leaderboard 📈"
     )
 
     try:
