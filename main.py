@@ -559,7 +559,7 @@ async def afk_handler(_, message: Message):
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return: {e}")
-            sent_msg = await message.reply_text(f"**{user.first_name}** is active again", disable_web_page_preview=True)
+            sent_msg = await message.reply_text(f"🌟 **Welcome Back!**\n\n**{user.first_name}** has returned after being AFK for {seenago}", disable_web_page_preview=True)
             await track_message_for_deletion(sent_msg)
         return
 
