@@ -53,11 +53,14 @@ START_TIME = time.time()
 mongo_client = AsyncIOMotorClient(MONGODB_URI)
 db = mongo_client.afk_db
 afk_collection = db.afk
-users_collection = db.users  # For user stats
-groups_collection = db.groups  # For tracking groups
-broadcast_collection = db.broadcast_tmp  # For temporary broadcast data
-auto_delete_collection = db.auto_delete  # For auto-delete settings and messages
-afk_stats_collection = db.afk_stats  # ✅ NEW: For tracking highest AFK per user
+users_collection = db.users
+groups_collection = db.groups
+broadcast_collection = db.broadcast_tmp
+auto_delete_collection = db.auto_delete
+afk_stats_collection = db.afk_stats
+achievements_collection = db.achievements  # ✅ NEW: Achievements tracking
+global_king_collection = db.global_king  # ✅ NEW: Global King tracking
+group_king_collection = db.group_king  # ✅ NEW: Group King tracking
 
 # Helper functions
 def get_readable_time(seconds: int) -> str:
@@ -77,6 +80,152 @@ def get_readable_time(seconds: int) -> str:
 
 def generate_random_id(length=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+# ✅ NEW: Achievement System
+ACHIEVEMENTS = {
+    "first_afk": {"emoji": "🎉", "name": "First AFK", "description": "Set AFK for the first time"},
+    "hour_master": {"emoji": "⏰", "name": "Hour Master", "description": "1 hour straight AFK"},
+    "day_master": {"emoji": "📅", "name": "Day Master", "description": "24 hours straight AFK"},
+    "bronze": {"emoji": "🥉", "name": "Bronze Achiever", "description": "Reach 1 hour total AFK"},
+    "silver": {"emoji": "🥈", "name": "Silver Achiever", "description": "Reach 10 hours total AFK"},
+    "gold": {"emoji": "🥇", "name": "Gold Achiever", "description": "Reach 100 hours total AFK"},
+    "platinum": {"emoji": "💎", "name": "Platinum Achiever", "description": "Reach 500 hours total AFK"},
+    "legendary": {"emoji": "👑", "name": "Legendary", "description": "Reach 1000 hours total AFK"},
+    "afk_master": {"emoji": "🔥", "name": "AFK Master", "description": "50 times AFK"},
+    "king": {"emoji": "👸", "name": "AFK King", "description": "Highest AFK user overall"},
+}
+
+async def check_and_unlock_achievements(user_id: int):
+    """Check and unlock achievements for user"""
+    try:
+        user_data = await users_collection.find_one({"user_id": user_id})
+        afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+        achievements = await achievements_collection.find_one({"user_id": user_id})
+        
+        if not achievements:
+            achievements = {"user_id": user_id, "unlocked": []}
+        
+        unlocked = achievements.get("unlocked", [])
+        total_afk_time = user_data.get("total_afk_time", 0) if user_data else 0
+        total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+        
+        # Check each achievement
+        new_unlocked = []
+        
+        if "first_afk" not in unlocked and total_afks >= 1:
+            new_unlocked.append("first_afk")
+        
+        if "hour_master" not in unlocked and afk_stats and afk_stats.get("highest_afk", 0) >= 3600:
+            new_unlocked.append("hour_master")
+        
+        if "day_master" not in unlocked and afk_stats and afk_stats.get("highest_afk", 0) >= 86400:
+            new_unlocked.append("day_master")
+        
+        if "bronze" not in unlocked and total_afk_time >= 3600:
+            new_unlocked.append("bronze")
+        
+        if "silver" not in unlocked and total_afk_time >= 36000:
+            new_unlocked.append("silver")
+        
+        if "gold" not in unlocked and total_afk_time >= 360000:
+            new_unlocked.append("gold")
+        
+        if "platinum" not in unlocked and total_afk_time >= 1800000:
+            new_unlocked.append("platinum")
+        
+        if "legendary" not in unlocked and total_afk_time >= 3600000:
+            new_unlocked.append("legendary")
+        
+        if "afk_master" not in unlocked and total_afks >= 50:
+            new_unlocked.append("afk_master")
+        
+        if new_unlocked:
+            unlocked.extend(new_unlocked)
+            await achievements_collection.update_one(
+                {"user_id": user_id},
+                {"$set": {"unlocked": unlocked}},
+                upsert=True
+            )
+            return new_unlocked
+        
+        return []
+    except Exception as e:
+        logger.error(f"Error checking achievements: {e}")
+        return []
+
+async def get_user_achievements(user_id: int):
+    """Get all achievements for a user"""
+    try:
+        achievements = await achievements_collection.find_one({"user_id": user_id})
+        return achievements.get("unlocked", []) if achievements else []
+    except Exception as e:
+        logger.error(f"Error getting achievements: {e}")
+        return []
+
+# ✅ NEW: AFK King/Queen System
+async def update_global_king(user_id: int, user_name: str):
+    """Update global AFK King"""
+    try:
+        user_data = await users_collection.find_one({"user_id": user_id})
+        total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+        
+        king_data = await global_king_collection.find_one({"rank": 1})
+        
+        if not king_data or total_afk > king_data.get("total_afk_time", 0):
+            await global_king_collection.update_one(
+                {"rank": 1},
+                {"$set": {
+                    "user_id": user_id,
+                    "name": user_name,
+                    "total_afk_time": total_afk,
+                    "updated_at": datetime.utcnow()
+                }},
+                upsert=True
+            )
+            logger.info(f"Global King updated: {user_name}")
+    except Exception as e:
+        logger.error(f"Error updating global king: {e}")
+
+async def update_group_king(chat_id: int, user_id: int, user_name: str):
+    """Update group AFK King"""
+    try:
+        user_data = await users_collection.find_one({"user_id": user_id})
+        total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+        
+        king_data = await group_king_collection.find_one({"chat_id": chat_id})
+        
+        if not king_data or total_afk > king_data.get("total_afk_time", 0):
+            await group_king_collection.update_one(
+                {"chat_id": chat_id},
+                {"$set": {
+                    "user_id": user_id,
+                    "name": user_name,
+                    "total_afk_time": total_afk,
+                    "updated_at": datetime.utcnow()
+                }},
+                upsert=True
+            )
+            logger.info(f"Group King updated for {chat_id}: {user_name}")
+    except Exception as e:
+        logger.error(f"Error updating group king: {e}")
+
+async def get_global_king():
+    """Get global AFK King"""
+    try:
+        king = await global_king_collection.find_one({"rank": 1})
+        return king if king else None
+    except Exception as e:
+        logger.error(f"Error getting global king: {e}")
+        return None
+
+async def get_group_king(chat_id: int):
+    """Get group AFK King"""
+    try:
+        king = await group_king_collection.find_one({"chat_id": chat_id})
+        return king if king else None
+    except Exception as e:
+        logger.error(f"Error getting group king: {e}")
+        return None
 
 async def add_afk(user_id: int, details: dict):
     if not isinstance(details, dict):
@@ -125,16 +274,12 @@ async def update_user_afk_time(user_id: int, additional_seconds: int):
         upsert=True
     )
 
-# ✅ NEW: Store and get highest AFK duration
 async def store_afk_duration(user_id: int, afk_duration: int):
-    """
-    Store the AFK duration and update highest AFK if this is higher
-    """
+    """Store the AFK duration and update highest AFK if this is higher"""
     try:
         user_afk = await afk_stats_collection.find_one({"user_id": user_id})
         
         if user_afk:
-            # User exists - update if this AFK is higher
             if afk_duration > user_afk.get("highest_afk", 0):
                 await afk_stats_collection.update_one(
                     {"user_id": user_id},
@@ -147,13 +292,11 @@ async def store_afk_duration(user_id: int, afk_duration: int):
                     }
                 )
             else:
-                # Just increment total_afks
                 await afk_stats_collection.update_one(
                     {"user_id": user_id},
                     {"$inc": {"total_afks": 1}}
                 )
         else:
-            # New user - create entry
             await afk_stats_collection.insert_one({
                 "user_id": user_id,
                 "highest_afk": afk_duration,
@@ -168,15 +311,10 @@ async def store_afk_duration(user_id: int, afk_duration: int):
         logger.error(f"Error storing AFK duration: {e}")
         return False
 
-
 async def get_highest_afk_duration(user_id: int) -> int:
-    """
-    Get the highest AFK duration for a user
-    Returns the duration in seconds
-    """
+    """Get the highest AFK duration for a user"""
     try:
         user_afk = await afk_stats_collection.find_one({"user_id": user_id})
-        
         if user_afk:
             return user_afk.get("highest_afk", 0)
         return 0
@@ -220,7 +358,7 @@ async def init_group_auto_delete_settings(chat_id: int):
             "type": "group_settings",
             "chat_id": chat_id,
             "enabled": False,
-            "delete_after": 300  # 5 minutes
+            "delete_after": 300
         })
         logger.info(f"Initialized auto-delete settings for group {chat_id}")
 
@@ -307,7 +445,6 @@ async def auto_delete_loop():
                 except Exception as e:
                     logger.debug(f"Failed to delete message {msg.get('message_id')} in {msg.get('chat_id')}: {e}")
                 finally:
-                    # Remove from tracking regardless of success
                     await auto_delete_collection.delete_one({"_id": msg["_id"]})
 
             await asyncio.sleep(30)
@@ -385,7 +522,6 @@ class Bot(Client):
         await super().start()
         logger.info("Bot client started successfully")
 
-        # Send startup notification to owner
         if OWNER_ID:
             try:
                 me = await self.get_me()
@@ -404,7 +540,6 @@ class Bot(Client):
 
 app = Bot()
 
-# Track bot start time for uptime
 BOT_START_TIME = time.time()
 
 # Track when bot is added to a group
@@ -419,7 +554,7 @@ async def new_chat_members(_, message: Message):
             logger.info(f"Bot added to group: {message.chat.title} ({message.chat.id})")
             await init_group_auto_delete_settings(message.chat.id)
 
-# Start command handler with new image and message
+# Start command handler
 @app.on_message(filters.command(["start", "help"]))
 async def start_command(_, message: Message):
     user = message.from_user
@@ -428,12 +563,10 @@ async def start_command(_, message: Message):
 
     uptime = get_readable_time(int(time.time() - BOT_START_TIME))
 
-    # Track group if in a group
     if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await track_group(message.chat.id, message.chat.title)
         await init_group_auto_delete_settings(message.chat.id)
 
-    # Add user to database for stats
     await add_user(user.id, user.first_name or "", user.username or "")
 
     keyboard = InlineKeyboardMarkup(
@@ -457,7 +590,8 @@ async def start_command(_, message: Message):
         "🔹 Smart AFK Management\n"
         "🔹 Auto AFK Removal\n"
         "🔹 AFK Duration Tracking\n"
-        "🔹 Media AFK Support\n\n"
+        "🔹 Media AFK Support\n"
+        "🔹 Achievements & Leaderboard\n\n"
         "Stay connected, even when you're away. 🚀"
         "Let's get started! 🚀"
     )
@@ -475,15 +609,16 @@ async def help_callback(_, query: CallbackQuery):
     help_text = (
         "**📋 ALL COMMANDS**\n\n"
         "**To set AFK:**\n"
-        "- /afk - Sets status with default message: \"Away from keyboard\"\n"
-        "- Set media AFK - Reply to a photo, GIF, or sticker with /afk or brb. "
-        "Your media will be shown to people who mention you\n\n"
-        "**🔔 WHAT HAPPENS WHEN YOU'RE AFK?**\n"
-        "✅ Someone mentions you (@username). They see your AFK reason & duration!\n"
-        "- Send any message to disable AFK\n\n"
-        "**Other Commands:**\n"
-        "- /stats - View detailed bot insights & activity statistics\n"
-        "- /topafk - Display the Top users with the highest AFK duration"
+        "- /afk - Sets status with default message\n"
+        "- Set media AFK - Reply to a photo/GIF/sticker with /afk\n\n"
+        "**🔔 AFK COMMANDS:**\n"
+        "- /stats - View bot statistics\n"
+        "- /topafk - Top 10 AFK users globally\n"
+        "- /afk_achievements - Your achievements 🏅\n"
+        "- /my_records - Your personal AFK records 📊\n"
+        "- /afk_king - Global AFK King 👑\n"
+        "- /group_king - Group AFK King 🏆\n"
+        "- /leaderboard - Group leaderboard 📈"
     )
 
     try:
@@ -495,7 +630,6 @@ async def help_callback(_, query: CallbackQuery):
             disable_web_page_preview=True,
         )
     except Exception:
-        # fallback to answer
         await query.answer("Help shown", show_alert=True)
 
 # Back to start callback handler
@@ -527,7 +661,8 @@ async def back_callback(_, query: CallbackQuery):
         "🔹 Smart AFK Management\n"
         "🔹 Auto AFK Removal\n"
         "🔹 AFK Duration Tracking\n"
-        "🔹 Media AFK Support\n\n"
+        "🔹 Media AFK Support\n"
+        "🔹 Achievements & Leaderboard\n\n"
         "Stay connected, even when you're away. 🚀"
         "Let's get started! 🚀"
     )
@@ -545,7 +680,176 @@ async def back_callback(_, query: CallbackQuery):
             disable_web_page_preview=True
          )
 
-# ✅ UPDATED: Handle "View Highest AFK" button callback with detailed stats
+# ✅ NEW: Achievements Command
+@app.on_message(filters.command("afk_achievements"))
+async def afk_achievements_command(_, message: Message):
+    """Show user's achievements"""
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "User"
+    
+    unlocked_achievements = await get_user_achievements(user_id)
+    
+    if not unlocked_achievements:
+        text = f"📭 **{user_name}**, you haven't unlocked any achievements yet!\n\nGo AFK to unlock them! 🚀"
+        sent_msg = await message.reply_text(text)
+        await track_message_for_deletion(sent_msg)
+        return
+    
+    text = f"🏅 **{user_name}'s Achievements**\n\n"
+    text += f"Total Unlocked: <code>{len(unlocked_achievements)}</code>\n\n"
+    
+    for achievement_key in unlocked_achievements:
+        if achievement_key in ACHIEVEMENTS:
+            ach = ACHIEVEMENTS[achievement_key]
+            text += f"{ach['emoji']} <b>{ach['name']}</b>\n"
+            text += f"   <i>{ach['description']}</i>\n\n"
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 My Records", callback_data=f"my_records_{user_id}")]
+    ])
+    
+    sent_msg = await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+    await track_message_for_deletion(sent_msg)
+
+# ✅ NEW: My Records Command
+@app.on_callback_query(filters.regex(r"^my_records_"))
+async def my_records_callback(_, query: CallbackQuery):
+    """Show personal AFK records"""
+    await query.answer()
+    user_id = query.from_user.id
+    user_name = query.from_user.first_name or "User"
+    
+    user_data = await users_collection.find_one({"user_id": user_id})
+    afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+    
+    total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+    highest_afk = afk_stats.get("highest_afk", 0) if afk_stats else 0
+    total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+    avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
+    
+    text = (
+        f"📊 <b>{user_name}'s AFK Records</b>\n"
+        f"{'─' * 40}\n\n"
+        f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
+        f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
+        f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
+        f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
+    )
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏅 Achievements", callback_data=f"view_ach_{user_id}")]
+    ])
+    
+    try:
+        await query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
+    except Exception:
+        await query.answer("Updated", show_alert=False)
+
+@app.on_message(filters.command("my_records"))
+async def my_records_command(_, message: Message):
+    """Show personal AFK records"""
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "User"
+    
+    user_data = await users_collection.find_one({"user_id": user_id})
+    afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+    
+    total_afk = user_data.get("total_afk_time", 0) if user_data else 0
+    highest_afk = afk_stats.get("highest_afk", 0) if afk_stats else 0
+    total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+    avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
+    
+    text = (
+        f"📊 <b>{user_name}'s AFK Records</b>\n"
+        f"{'─' * 40}\n\n"
+        f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
+        f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
+        f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
+        f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
+    )
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏅 Achievements", callback_data=f"view_ach_{user_id}")]
+    ])
+    
+    sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
+    await track_message_for_deletion(sent_msg)
+
+# ✅ NEW: Global AFK King Command
+@app.on_message(filters.command("afk_king"))
+async def afk_king_command(_, message: Message):
+    """Show global AFK King"""
+    king = await get_global_king()
+    
+    if not king:
+        text = "👑 <b>Global AFK King</b>\n\nNo King crowned yet! Be the first! 🚀"
+    else:
+        total_time = king.get("total_afk_time", 0)
+        readable_time = get_readable_time(total_time)
+        text = (
+            f"👑 <b>Global AFK King</b>\n\n"
+            f"<b>Name:</b> {king.get('name', 'Unknown')}\n"
+            f"<b>Total AFK:</b> <code>{readable_time}</code>\n"
+            f"<b>User ID:</b> <code>{king.get('user_id')}</code>"
+        )
+    
+    sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+    await track_message_for_deletion(sent_msg)
+
+# ✅ NEW: Group AFK King Command
+@app.on_message(filters.command("group_king") & filters.group)
+async def group_king_command(_, message: Message):
+    """Show group AFK King"""
+    chat_id = message.chat.id
+    king = await get_group_king(chat_id)
+    
+    if not king:
+        text = "🏆 <b>Group AFK King</b>\n\nNo King crowned yet in this group! Be the first! 🚀"
+    else:
+        total_time = king.get("total_afk_time", 0)
+        readable_time = get_readable_time(total_time)
+        text = (
+            f"🏆 <b>Group AFK King</b>\n\n"
+            f"<b>Name:</b> {king.get('name', 'Unknown')}\n"
+            f"<b>Total AFK:</b> <code>{readable_time}</code>"
+        )
+    
+    sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+    await track_message_for_deletion(sent_msg)
+
+# ✅ NEW: Leaderboard Command
+@app.on_message(filters.command("leaderboard") & filters.group)
+async def leaderboard_command(_, message: Message):
+    """Show group leaderboard"""
+    chat_id = message.chat.id
+    
+    top_users = await get_top_afk_users(10)
+    
+    if not top_users:
+        text = "📈 <b>AFK Leaderboard</b>\n\nNo records yet!"
+        sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+        await track_message_for_deletion(sent_msg)
+        return
+    
+    text = "📈 <b>Global AFK Leaderboard</b>\n\n"
+    for idx, user in enumerate(top_users, start=1):
+        first_name = user.get("first_name", "Unknown")
+        total_time = user.get("total_afk_time", 0)
+        readable_time = get_readable_time(total_time)
+        
+        if idx == 1:
+            text += f"🥇 {idx}. <b>{first_name}</b> - {readable_time}\n"
+        elif idx == 2:
+            text += f"🥈 {idx}. <b>{first_name}</b> - {readable_time}\n"
+        elif idx == 3:
+            text += f"🥉 {idx}. <b>{first_name}</b> - {readable_time}\n"
+        else:
+            text += f"{idx}. <b>{first_name}</b> - {readable_time}\n"
+    
+    sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+    await track_message_for_deletion(sent_msg)
+
+# ✅ NEW: View Highest AFK with achievements
 @app.on_callback_query(filters.regex(r"^view_highest_afk_"))
 async def view_highest_afk_callback(_, query: CallbackQuery):
     """Handle the 'View Highest AFK' button click with detailed stats"""
@@ -554,22 +858,21 @@ async def view_highest_afk_callback(_, query: CallbackQuery):
         user = query.from_user
         user_name = user.first_name or "User"
         
-        # Get the highest AFK duration from database
         highest_afk = await get_highest_afk_duration(user_id)
         
-        # Get total AFK time from users collection
         user_data = await users_collection.find_one({"user_id": user_id})
         total_afk_time = user_data.get("total_afk_time", 0) if user_data else 0
         
-        # Get AFK stats from afk_stats collection
         afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
         total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
         
-        # Calculate average AFK
         avg_afk = (total_afk_time // total_afks) if total_afks > 0 else 0
         
+        # Check achievements
+        new_achievements = await check_and_unlock_achievements(user_id)
+        unlocked = await get_user_achievements(user_id)
+        
         if highest_afk > 0:
-            # Convert seconds to readable format
             highest_readable = get_readable_time(highest_afk)
             total_readable = get_readable_time(total_afk_time)
             avg_readable = get_readable_time(avg_afk)
@@ -581,8 +884,18 @@ async def view_highest_afk_callback(_, query: CallbackQuery):
                 f"⏱️  <b>Longest AFK:</b> <code>{highest_readable}</code>\n"
                 f"⏳ <b>Total AFK Time:</b> <code>{total_readable}</code>\n"
                 f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
-                f"📈 <b>Average AFK:</b> <code>{avg_readable}</code>\n"
+                f"📈 <b>Average AFK:</b> <code>{avg_readable}</code>\n\n"
             )
+            
+            if new_achievements:
+                response_text += f"🎉 <b>New Achievements Unlocked!</b>\n"
+                for ach_key in new_achievements:
+                    if ach_key in ACHIEVEMENTS:
+                        ach = ACHIEVEMENTS[ach_key]
+                        response_text += f"   {ach['emoji']} {ach['name']}\n"
+                response_text += "\n"
+            
+            response_text += f"🏅 <b>Achievements:</b> <code>{len(unlocked)}</code> unlocked"
         else:
             response_text = (
                 f"🥇 <b>{user_name}</b>\n"
@@ -591,15 +904,12 @@ async def view_highest_afk_callback(_, query: CallbackQuery):
                 f"Go AFK first to create a record! 📍"
             )
         
-        # Remove the loading state
         await query.answer()
         
-        # Create back button
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back", callback_data=f"back_from_stats_{user_id}")]
         ])
         
-        # Edit the message to show the stats
         await query.message.edit_text(
             text=response_text,
             parse_mode=enums.ParseMode.HTML,
@@ -612,21 +922,19 @@ async def view_highest_afk_callback(_, query: CallbackQuery):
         logger.error(f"Error in view_highest_afk_callback: {e}")
         await query.answer(f"❌ Error fetching AFK stats", show_alert=True)
 
-# ✅ NEW: Back from stats callback handler
+# Back from stats callback
 @app.on_callback_query(filters.regex(r"^back_from_stats_"))
 async def back_from_stats_callback(_, query: CallbackQuery):
-    """Go back from AFK stats to welcome back message"""
+    """Go back from AFK stats"""
     try:
         user_id = query.from_user.id
         user_name = query.from_user.first_name or "User"
         
         await query.answer()
         
-        # Get AFK data
         verifier, reasondb = await is_afk(user_id)
         
         if verifier:
-            # User still AFK - show welcome back message
             afk_start = reasondb.get("time", time.time())
             try:
                 afk_duration = int(time.time() - float(afk_start))
@@ -642,7 +950,6 @@ async def back_from_stats_callback(_, query: CallbackQuery):
                 base_text += f"\n\n📝 <b>AFK Reason:</b> <code>{reasonafk}</code>"
             base_text += "\n\n✅ <b>Status: Online</b>"
             
-            # Recreate button
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
             ])
@@ -653,7 +960,6 @@ async def back_from_stats_callback(_, query: CallbackQuery):
                 reply_markup=keyboard
             )
         else:
-            # User not AFK - show default message
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
             ])
@@ -667,7 +973,7 @@ async def back_from_stats_callback(_, query: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in back_from_stats_callback: {e}")
         await query.answer(f"❌ Error", show_alert=True)
-        
+
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
 async def afk_handler(_, message: Message):
@@ -684,15 +990,12 @@ async def afk_handler(_, message: Message):
 
     verifier, reasondb = await is_afk(user_id)
 
-    # Track group if in a group
     if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await track_group(message.chat.id, message.chat.title)
         await init_group_auto_delete_settings(message.chat.id)
 
-    # Add user to database for stats (update name and username)
     await add_user(user_id, user.first_name or "", user.username or "")
 
-    # Extract command and reason from message
     reason_text = None
     if message.text and message.text.lower().startswith("brb"):
         parts = message.text.split(" ", 1)
@@ -702,7 +1005,6 @@ async def afk_handler(_, message: Message):
         if cmd and len(cmd) > 1:
             reason_text = " ".join(cmd[1:])
 
-    # User is returning from AFK
     if verifier:
         afk_start = reasondb.get("time", time.time())
         try:
@@ -710,11 +1012,14 @@ async def afk_handler(_, message: Message):
         except Exception:
             afk_duration = 0
         
-        # ✅ Store the AFK duration
         await store_afk_duration(user_id, afk_duration)
-        
         await update_user_afk_time(user_id, afk_duration)
         await remove_afk(user_id)
+        
+        # Update kings
+        await update_global_king(user_id, user.first_name or "Unknown")
+        if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            await update_group_king(message.chat.id, user_id, user.first_name or "Unknown")
 
         try:
             afktype = reasondb.get("type", "text")
@@ -728,17 +1033,14 @@ async def afk_handler(_, message: Message):
                 base_text += f"\n\n📝 **AFK Reason:** `{reasonafk}`"
             base_text += "\n\n✅ Status: **Online**"
 
-            # ✅ Create inline keyboard with button
             keyboard = [
                 [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Prefer sending stored file_id if available. If photo type used local file, fallback to file path.
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
             elif afktype == "photo":
-                # if data exists (file_id), use it; else use local file download path
                 if data:
                     sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
                 else:
@@ -748,10 +1050,8 @@ async def afk_handler(_, message: Message):
                     else:
                         sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             elif afktype == "sticker":
-                # ✅ FIX: Handle sticker with button
                 if data:
                     sent_msg = await message.reply_sticker(sticker=data)
-                    # Send text with button separately
                     await asyncio.sleep(0.5)
                     sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
                 else:
@@ -765,7 +1065,6 @@ async def afk_handler(_, message: Message):
             await track_message_for_deletion(sent_msg)
         return
 
-    # Setting new AFK status
     details = {
         "type": "text",
         "time": time.time(),
@@ -773,12 +1072,10 @@ async def afk_handler(_, message: Message):
         "reason": (reason_text[:100] if reason_text else None),
     }
 
-    # Handle media in the same message (prefer file_id storage)
     try:
         if message.animation:
             details.update({"type": "animation", "data": message.animation.file_id, "time": time.time()})
         elif message.photo:
-            # store file_id of the largest available photo
             try:
                 if isinstance(message.photo, (list, tuple)):
                     file_id = message.photo[-1].file_id
@@ -787,7 +1084,6 @@ async def afk_handler(_, message: Message):
                 details.update({"type": "photo", "data": file_id, "time": time.time()})
             except Exception:
                 details.update({"type": "photo", "data": None, "time": time.time()})
-        # handle replies to media
         elif message.reply_to_message:
             rm = message.reply_to_message
             if rm.animation:
@@ -802,7 +1098,6 @@ async def afk_handler(_, message: Message):
                 except Exception:
                     details.update({"type": "photo", "data": None, "time": time.time()})
             elif rm.sticker:
-                # ✅ FIX: Properly handle sticker reply
                 try:
                     details.update({"type": "sticker", "data": rm.sticker.file_id, "time": time.time()})
                 except Exception:
@@ -810,7 +1105,6 @@ async def afk_handler(_, message: Message):
     except Exception as e:
         logger.error(f"Error while extracting media for AFK: {e}")
 
-    # Save AFK status to database
     await add_afk(user_id, details)
     response = f"**{user.first_name}** is now away from keyboard🚶"
     if details.get("reason"):
@@ -830,18 +1124,14 @@ async def afk_watcher(_, message: Message):
     userid = message.from_user.id
     user_name = message.from_user.first_name or "User"
 
-    # Track group
     if message.chat:
         await track_group(message.chat.id, message.chat.title)
         await init_group_auto_delete_settings(message.chat.id)
 
-    # Add user to database for stats (update name and username)
     await add_user(userid, message.from_user.first_name or "", message.from_user.username or "")
 
-    # Check if user is returning from AFK
     verifier, reasondb = await is_afk(userid)
     if verifier:
-        # Skip when the message is actually an AFK command
         text_lower = ((message.text or "") + " " + (message.caption or "")).lower()
         if any(cmd in text_lower for cmd in ["/afk", "!afk", "brb"]):
             return
@@ -852,11 +1142,13 @@ async def afk_watcher(_, message: Message):
         except Exception:
             afk_duration = 0
         
-        # ✅ Store the AFK duration
         await store_afk_duration(userid, afk_duration)
-        
         await update_user_afk_time(userid, afk_duration)
         await remove_afk(userid)
+        
+        # Update kings
+        await update_global_king(userid, user_name)
+        await update_group_king(message.chat.id, userid, user_name)
 
         try:
             afktype = reasondb.get("type", "text")
@@ -869,7 +1161,6 @@ async def afk_watcher(_, message: Message):
             if reasonafk:
                 base_text += f"\n\nReason: `{reasonafk}`"
 
-            # ✅ Create inline keyboard with button
             keyboard = [
                 [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]
             ]
@@ -887,10 +1178,8 @@ async def afk_watcher(_, message: Message):
                     else:
                         sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             elif afktype == "sticker":
-                # ✅ FIX: Handle sticker with button in watcher
                 if data:
                     sent_msg = await message.reply_sticker(sticker=data)
-                    # Send text with button separately
                     await asyncio.sleep(0.5)
                     sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
                 else:
@@ -903,7 +1192,6 @@ async def afk_watcher(_, message: Message):
             sent_msg = await message.reply_text(f"**{user_name}** is now available again after some time", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]]))
             await track_message_for_deletion(sent_msg)
 
-    # Check if replying to AFK user
     if message.reply_to_message and message.reply_to_message.from_user:
         try:
             replied_user = message.reply_to_message.from_user
@@ -932,7 +1220,6 @@ async def afk_watcher(_, message: Message):
                         else:
                             sent_msg = await message.reply_text(base_text)
                 elif afktype == "sticker":
-                    # ✅ FIX: Handle sticker reply mention
                     if data:
                         sent_msg = await message.reply_sticker(sticker=data)
                         await asyncio.sleep(0.5)
@@ -945,7 +1232,6 @@ async def afk_watcher(_, message: Message):
         except Exception as e:
             logger.error(f"Error in AFK reply watcher: {e}")
 
-    # Check mentioned users
     text_to_scan = message.text or ""
     if message.entities and text_to_scan:
         for entity in message.entities:
@@ -985,7 +1271,6 @@ async def afk_watcher(_, message: Message):
                                 else:
                                     sent_msg = await message.reply_text(base_text)
                         elif afktype == "sticker":
-                            # ✅ FIX: Handle sticker mention
                             if data:
                                 sent_msg = await message.reply_sticker(sticker=data)
                                 await asyncio.sleep(0.5)
@@ -1024,7 +1309,6 @@ async def afk_watcher(_, message: Message):
                                 else:
                                     sent_msg = await message.reply_text(base_text)
                         elif afktype == "sticker":
-                            # ✅ FIX: Handle sticker text mention
                             if data:
                                 sent_msg = await message.reply_sticker(sticker=data)
                                 await asyncio.sleep(0.5)
@@ -1036,341 +1320,6 @@ async def afk_watcher(_, message: Message):
                         await track_message_for_deletion(sent_msg)
             except Exception as e:
                 logger.error(f"Error handling mention: {e}")
-
-# Helper function for user broadcasting
-async def broadcast_to_users(message, broadcast_type, text=None, replied_msg=None):
-    total = 0
-    success = 0
-    failed = 0
-
-    users = await users_collection.distinct("user_id")
-    total_users = len(users)
-
-    status = await message.reply_text(f"📤 Broadcasting to {total_users} users...")
-
-    for user_id in users:
-        try:
-            if text:
-                sent_msg = await app.send_message(chat_id=user_id, text=text)
-                await track_message_for_deletion(sent_msg)
-            elif replied_msg:
-                if broadcast_type == "bcast":
-                    sent_msg = await app.copy_message(
-                        chat_id=user_id,
-                        from_chat_id=replied_msg.chat.id,
-                        message_id=replied_msg.id
-                    )
-                else:  # fcast
-                    sent_msg = await app.forward_messages(
-                        chat_id=user_id,
-                        from_chat_id=replied_msg.chat.id,
-                        message_ids=replied_msg.id
-                    )
-                await track_message_for_deletion(sent_msg)
-            success += 1
-        except Exception as e:
-            failed += 1
-            logger.error(f"Failed to send to {user_id}: {e}")
-
-        total += 1
-        if total % 100 == 0:
-            try:
-                await status.edit_text(f"👤 User broadcast: {total}/{total_users}")
-            except Exception:
-                pass
-
-    return total_users, success, failed, status
-
-# Helper function for group broadcasting
-async def broadcast_to_groups(message, broadcast_type, text=None, replied_msg=None, exclude_chat_id=None, pin_message=False):
-    total = 0
-    success = 0
-    failed = 0
-
-    groups = await get_all_groups()
-    total_groups = len(groups)
-
-    status = await message.reply_text(f"📤 Broadcasting to {total_groups} groups...")
-
-    for group in groups:
-        try:
-            group_chat_id = group.get("chat_id")
-            if not group_chat_id:
-                continue
-            # Skip excluded chat
-            if exclude_chat_id and group_chat_id == exclude_chat_id:
-                continue
-
-            sent_msg = None
-            if text:
-                sent_msg = await app.send_message(chat_id=group_chat_id, text=text)
-            elif replied_msg:
-                if broadcast_type == "bcast":
-                    sent_msg = await app.copy_message(
-                        chat_id=group_chat_id,
-                        from_chat_id=replied_msg.chat.id,
-                        message_id=replied_msg.id
-                    )
-                else:
-                    sent_msg = await app.forward_messages(
-                        chat_id=group_chat_id,
-                        from_chat_id=replied_msg.chat.id,
-                        message_ids=replied_msg.id
-                    )
-
-            if pin_message and sent_msg:
-                try:
-                    await app.pin_chat_message(chat_id=group_chat_id, message_id=sent_msg.id)
-                except ChatAdminRequired:
-                    logger.warning(f"Bot lacks permission to pin in group {group_chat_id}")
-                except Exception as e:
-                    logger.error(f"Pin message failed in group {group_chat_id}: {e}")
-
-            if sent_msg:
-                await track_message_for_deletion(sent_msg)
-
-            success += 1
-        except Exception as e:
-            failed += 1
-            logger.error(f"Failed to send to group {group.get('chat_id')}: {e}")
-
-        total += 1
-        if total % 10 == 0:
-            try:
-                await status.edit_text(f"👥 Group broadcast: {total}/{total_groups}")
-            except Exception:
-                pass
-
-    return total_groups, success, failed, status
-
-# Broadcast command with inline options
-@app.on_message(filters.command(["bcast", "fcast"]) & filters.user(OWNER_ID))
-async def broadcast_menu(_, message: Message):
-    broadcast_id = generate_random_id()
-
-    if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await track_group(message.chat.id, message.chat.title)
-
-    text_content = None
-    replied_msg = None
-
-    if message.reply_to_message:
-        replied_msg = message.reply_to_message
-    elif message.text and getattr(message, "command", None) and len(message.command) > 1:
-        text_content = " ".join(message.command[1:])
-
-    await broadcast_collection.update_one(
-        {"broadcast_id": broadcast_id},
-        {"$set": {
-            "command": message.command[0].lower() if getattr(message, "command", None) else "bcast",
-            "text": text_content,
-            "replied_msg_id": replied_msg.id if replied_msg else None,
-            "replied_chat_id": replied_msg.chat.id if replied_msg else None,
-            "original_chat_id": message.chat.id if message.chat else None,
-            "original_msg_id": message.id,
-            "timestamp": datetime.utcnow()
-        }},
-        upsert=True
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📍 Pin", callback_data=f"broadcast_option:{broadcast_id}:pin"),
-            InlineKeyboardButton("👥 Group", callback_data=f"broadcast_option:{broadcast_id}:group")
-        ],
-        [
-            InlineKeyboardButton("👤 User", callback_data=f"broadcast_option:{broadcast_id}:user")
-        ],
-        [
-            InlineKeyboardButton("🚀 Send Now", callback_data=f"broadcast_confirm:{broadcast_id}"),
-            InlineKeyboardButton("❌ Cancel", callback_data=f"broadcast_cancel:{broadcast_id}")
-        ]
-    ])
-
-    text = "🔔 **Broadcast Options**\n\n"
-    if text_content:
-        text += f"Message: {text_content[:100]}{'...' if len(text_content) > 100 else ''}\n\n"
-    elif replied_msg:
-        text += "Message: Replied content\n\n"
-    else:
-        text += "⚠️ No message content provided\n\n"
-
-    text += "Select options:"
-
-    sent_msg = await message.reply_text(text, reply_markup=keyboard)
-    await track_message_for_deletion(sent_msg)
-
-# Callback handler for broadcast options
-@app.on_callback_query(filters.regex(r"^broadcast_option:(\w+):(\w+)$"))
-async def broadcast_option_handler(_, query: CallbackQuery):
-    await query.answer()
-    parts = query.data.split(":")
-    if len(parts) < 3:
-        await query.message.edit_text("❌ Invalid broadcast option")
-        return
-    broadcast_id = parts[1]
-    option = parts[2]
-
-    broadcast_data = await broadcast_collection.find_one({"broadcast_id": broadcast_id})
-    if not broadcast_data:
-        await query.message.edit_text("❌ Broadcast session expired or invalid")
-        return
-
-    current_options = broadcast_data.get("options", [])
-    if option in current_options:
-        current_options.remove(option)
-    else:
-        current_options.append(option)
-
-    await broadcast_collection.update_one(
-        {"broadcast_id": broadcast_id},
-        {"$set": {"options": current_options}}
-    )
-
-    text = "🔔 **Broadcast Options**\n\n"
-    if broadcast_data.get("text"):
-        text += f"Message: {broadcast_data['text'][:100]}{'...' if len(broadcast_data['text']) > 100 else ''}\n\n"
-    elif broadcast_data.get("replied_msg_id"):
-        text += "Message: Replied content\n\n"
-    else:
-        text += "⚠️ No message content provided\n\n"
-
-    text += "**Selected Options:**\n"
-    text += f"- 📍 Pin: {'✅' if 'pin' in current_options else '❌'}\n"
-    text += f"- 👥 Group: {'✅' if 'group' in current_options else '❌'}\n"
-    text += f"- 👤 User: {'✅' if 'user' in current_options else '❌'}\n\n"
-    text += "Select options:"
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📍 Pin", callback_data=f"broadcast_option:{broadcast_id}:pin"),
-            InlineKeyboardButton("👥 Group", callback_data=f"broadcast_option:{broadcast_id}:group")
-        ],
-        [
-            InlineKeyboardButton("👤 User", callback_data=f"broadcast_option:{broadcast_id}:user")
-        ],
-        [
-            InlineKeyboardButton("🚀 Send Now", callback_data=f"broadcast_confirm:{broadcast_id}"),
-            InlineKeyboardButton("❌ Cancel", callback_data=f"broadcast_cancel:{broadcast_id}")
-        ]
-    ])
-
-    try:
-        await query.message.edit_text(text, reply_markup=keyboard)
-    except Exception:
-        await query.answer("Updated options", show_alert=True)
-
-# Callback handler for broadcast confirmation
-@app.on_callback_query(filters.regex(r"^broadcast_confirm:(\w+)$"))
-async def broadcast_confirm_handler(_, query: CallbackQuery):
-    await query.answer()
-    broadcast_id = query.data.split(":")[1]
-
-    broadcast_data = await broadcast_collection.find_one({"broadcast_id": broadcast_id})
-    if not broadcast_data:
-        await query.message.edit_text("❌ Broadcast session expired or invalid")
-        return
-
-    options = broadcast_data.get("options", [])
-    command = broadcast_data.get("command", "bcast")
-    chat_id = broadcast_data.get("original_chat_id")
-
-    current_msg = None
-    replied_msg = None
-    try:
-        if broadcast_data.get("text"):
-            current_msg = await app.send_message(chat_id=chat_id, text=broadcast_data["text"])
-            await track_message_for_deletion(current_msg)
-        elif broadcast_data.get("replied_msg_id"):
-            replied_msg = await app.get_messages(broadcast_data["replied_chat_id"], broadcast_data["replied_msg_id"])
-            if command == "bcast":
-                current_msg = await app.copy_message(chat_id=chat_id, from_chat_id=replied_msg.chat.id, message_id=replied_msg.id)
-            else:
-                current_msg = await app.forward_messages(chat_id=chat_id, from_chat_id=replied_msg.chat.id, message_ids=replied_msg.id)
-            await track_message_for_deletion(current_msg)
-    except Exception as e:
-        logger.error(f"Current chat broadcast failed: {e}")
-        try:
-            await query.message.edit_text(f"❌ Failed to send in current chat: {e}")
-        except Exception:
-            pass
-
-    group_stats = ""
-    group_success = False
-    if "group" in options:
-        try:
-            if broadcast_data.get("text"):
-                total_groups, success, failed, status = await broadcast_to_groups(query.message, command, text=broadcast_data["text"], exclude_chat_id=chat_id, pin_message=("pin" in options))
-            else:
-                total_groups, success, failed, status = await broadcast_to_groups(query.message, command, replied_msg=replied_msg, exclude_chat_id=chat_id, pin_message=("pin" in options))
-
-            group_stats = (
-                f"\n👥 **Group Broadcast Stats**\n"
-                f"• Total groups: {total_groups}\n"
-                f"• Successful: {success}\n"
-                f"• Failed: {failed}"
-            )
-            group_success = True
-        except Exception as e:
-            logger.error(f"Group broadcast failed: {e}")
-            group_stats = f"\n❌ Group broadcast failed: {e}"
-
-    user_stats = ""
-    user_success = False
-    if "user" in options:
-        try:
-            if broadcast_data.get("text"):
-                total_users, success, failed, status = await broadcast_to_users(query.message, command, text=broadcast_data["text"])
-            else:
-                total_users, success, failed, status = await broadcast_to_users(query.message, command, replied_msg=replied_msg)
-
-            user_stats = (
-                f"\n👤 **User Broadcast Stats**\n"
-                f"• Total users: {total_users}\n"
-                f"• Successful: {success}\n"
-                f"• Failed: {failed}"
-            )
-            user_success = True
-        except Exception as e:
-            logger.error(f"User broadcast failed: {e}")
-            user_stats = f"\n❌ User broadcast failed: {e}"
-
-    result_text = "✅ **Broadcast Completed**\n\n"
-    if current_msg:
-        result_text += f"📍 Current chat message: Sent\n"
-    result_text += f"👥 Group broadcast: {'Sent' if group_success else 'Skipped'}\n"
-    result_text += f"👤 User broadcast: {'Sent' if user_success else 'Skipped'}"
-    result_text += group_stats
-    result_text += user_stats
-
-    keyboard = None
-    try:
-        if current_msg and chat_id:
-            if str(chat_id).startswith("-100"):
-                chat_id_str = str(chat_id).replace('-100', '')
-                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 View in Group", url=f"https://t.me/c/{chat_id_str}/{current_msg.id}")]])
-            else:
-                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 View Message", url=f"https://t.me/c/{chat_id}/{current_msg.id}")]])
-    except Exception:
-        keyboard = None
-
-    try:
-        await query.message.edit_text(result_text, reply_markup=keyboard)
-    except Exception:
-        await query.answer("Broadcast completed", show_alert=True)
-
-    await broadcast_collection.delete_one({"broadcast_id": broadcast_id})
-
-# Callback handler for broadcast cancellation
-@app.on_callback_query(filters.regex(r"^broadcast_cancel:(\w+)$"))
-async def broadcast_cancel_handler(_, query: CallbackQuery):
-    await query.answer("Broadcast cancelled")
-    broadcast_id = query.data.split(":")[1]
-    await broadcast_collection.delete_one({"broadcast_id": broadcast_id})
-    try:
-        await query.message.edit_text("❌ Broadcast cancelled")
-    except Exception:
-        pass
 
 # Stats command
 @app.on_message(filters.command("stats"))
@@ -1418,7 +1367,7 @@ async def top_afk_command(_, message: Message):
     sent_msg = await message.reply_text(text)
     await track_message_for_deletion(sent_msg)
 
-# Auto-delete menu command (inline buttons) - Per Group Settings
+# Auto-delete menu command
 @app.on_message(filters.command(["autodel", "autodelete"]) & filters.group)
 async def auto_delete_menu(_, message: Message):
     chat_id = message.chat.id
@@ -1438,14 +1387,13 @@ async def auto_delete_menu(_, message: Message):
     sent_msg = await message.reply_text(text, reply_markup=keyboard)
     await track_message_for_deletion(sent_msg)
 
-# Auto-delete callback handler - FIXED VERSION
+# Auto-delete callback handler
 @app.on_callback_query(filters.regex(r"^autodel_"))
 async def auto_delete_callback(_, query: CallbackQuery):
     """Handle auto-delete callback actions with group-specific settings"""
     try:
         data = query.data
 
-        # parse data
         if data.startswith("autodel_time:"):
             parts = data.split(':')
             if len(parts) < 3:
@@ -1455,12 +1403,10 @@ async def auto_delete_callback(_, query: CallbackQuery):
             chat_id = int(parts[2])
             action = "time"
         else:
-            # e.g. autodel_enable:CHAT_ID or autodel_disable:CHAT_ID etc
             parts = data.split(':')
             action = parts[0].replace("autodel_", "")
             chat_id = int(parts[1]) if len(parts) > 1 else None
 
-        # permission check
         try:
             member = await app.get_chat_member(chat_id, query.from_user.id)
             if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
@@ -1532,23 +1478,18 @@ async def auto_delete_callback(_, query: CallbackQuery):
 
 # Main execution
 async def main():
-    # Create downloads directory if not exists
     os.makedirs("downloads", exist_ok=True)
     logger.info("Created downloads directory")
 
-    # Start auto-delete background task
     asyncio.create_task(auto_delete_loop())
 
-    # Start Flask server in a separate thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info(f"Flask server started on port {PORT}")
 
-    # Start the Telegram bot
     await app.start()
     logger.info("Telegram bot is now running...")
 
-    # Keep the bot running
     await idle()
 
 if __name__ == "__main__":
