@@ -380,12 +380,12 @@ async def start_command(_, message: Message):
         [
             [
                 InlineKeyboardButton(
-                    "➕ Add to Group ➕",
+                    "✨ Add to Group ✨",
                     url=f"https://t.me/{BOT_USERNAME}?startgroup=true",
                 )
             ],
             [
-                InlineKeyboardButton("Help ❓", callback_data="help"),
+                InlineKeyboardButton("Help ❔", callback_data="help"),
             ]
         ]
     )
@@ -450,7 +450,7 @@ async def back_callback(_, query: CallbackQuery):
         [
             [
                 InlineKeyboardButton(
-                    "➕ Add to Group ➕",
+                    "✨ Add to Group ✨",
                     url=f"https://t.me/{BOT_USERNAME}?startgroup=true",
                 )
             ],
