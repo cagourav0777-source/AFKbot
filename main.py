@@ -570,7 +570,7 @@ async def view_highest_afk_callback(_, query: CallbackQuery):
         # Edit the message to show the stats
         await query.message.edit_text(
             text=response_text,
-            parse_mode="Markdown"
+            parse_mode=enums.ParseMode.HTML
         )
         
         logger.info(f"User {user_id} viewed their highest AFK")
