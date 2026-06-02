@@ -467,7 +467,6 @@ async def back_callback(_, query: CallbackQuery):
         "━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━\n\n"
         "Let's get started! 🚀"
     )
-     await message.reply_text(text, reply_markup=keyboard)
 
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
