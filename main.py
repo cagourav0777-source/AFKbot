@@ -695,7 +695,7 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"**{replied_user.first_name}** has been away for💤 {seenago}"
+                base_text = f"**{replied_user.first_name}**has been away for💤 {seenago}"
                 if reasonafk:
                     base_text += f"\n\nReason: `{reasonafk}`"
 
@@ -740,7 +740,7 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"**{user_obj.first_name}** is AFK since {seenago}"
+                        base_text = f"**{user_obj.first_name}**has been away for💤 {seenago}"
                         if reasonafk:
                             base_text += f"\n\nReason: `{reasonafk}`"
 
