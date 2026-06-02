@@ -403,14 +403,11 @@ async def start_command(_, message: Message):
         "Let's get started! 🚀"
     )
 
-    try:
-        await message.reply_photo(
-            photo="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
-            caption=text,
-            reply_markup=keyboard,
-        )
-    except Exception:
-        await message.reply_text(text, reply_markup=keyboard)
+    await message.reply_text(
+        text,
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
 
 # Help callback handler
 @app.on_callback_query(filters.regex("^help$"))
@@ -430,11 +427,17 @@ async def help_callback(_, query: CallbackQuery):
         "- /topafk - Display the Top users with the highest AFK duration"
     )
 
-    await message.reply_text(
-         text,
-         reply_markup=keyboard,
-         disable_web_page_preview=True
-    )
+    try:
+        await query.message.edit_text(
+            help_text,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("◀️ Back", callback_data="back_to_start")]]
+            ),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        # fallback to answer
+        await query.answer("Help shown", show_alert=True)
 
 # Back to start callback handler
 @app.on_callback_query(filters.regex("^back_to_start$"))
