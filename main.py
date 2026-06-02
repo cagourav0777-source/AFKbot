@@ -390,16 +390,17 @@ async def start_command(_, message: Message):
         ]
     )
 
-   text = (
-       "💤 **AFK ADVANCE BOT**\n"
-       "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-       f"👋 Hello **{user.first_name}**!\n\n"
-       "🔹 Smart AFK Management\n"
-       "🔹 Auto AFK Removal\n"
-       "🔹 AFK Duration Tracking\n"
-       "🔹 Media AFK Support\n\n"
-      "Stay connected, even when you're away. 🚀"
-  )
+    text = (
+        "💤 **AFK ADVANCE BOT**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👋 Hello **{user.first_name}**!\n\n"
+        "🔹 Smart AFK Management\n"
+        "🔹 Auto AFK Removal\n"
+        "🔹 AFK Duration Tracking\n"
+        "🔹 Media AFK Support\n\n"
+        "Stay connected, even when you're away. 🚀"
+        "Let's get started! 🚀"
+    )
 
     await message.reply_text(
         text,
@@ -459,16 +460,17 @@ async def back_callback(_, query: CallbackQuery):
         ]
     )
 
-   text = (
-       "💤 **AFK ADVANCE BOT**\n"
-       "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-       f"👋 Hello **{user.first_name}**!\n\n"
-       "🔹 Smart AFK Management\n"
-       "🔹 Auto AFK Removal\n"
-       "🔹 AFK Duration Tracking\n"
-       "🔹 Media AFK Support\n\n"
-      "Stay connected, even when you're away. 🚀"
-  )
+    text = (
+        "💤 **AFK ADVANCE BOT**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👋 Hello **{user.first_name}**!\n\n"
+        "🔹 Smart AFK Management\n"
+        "🔹 Auto AFK Removal\n"
+        "🔹 AFK Duration Tracking\n"
+        "🔹 Media AFK Support\n\n"
+        "Stay connected, even when you're away. 🚀"
+        "Let's get started! 🚀"
+    )
 
     try:
         await query.message.edit_text(
