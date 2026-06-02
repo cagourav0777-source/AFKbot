@@ -477,7 +477,7 @@ async def back_callback(_, query: CallbackQuery):
         "Let's get started! 🚀"
     )
 
-      try:
+    try:
         await query.message.edit_media(
             media=InputMediaPhoto(
                 media="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
