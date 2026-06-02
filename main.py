@@ -747,6 +747,15 @@ async def afk_handler(_, message: Message):
                         sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
                     else:
                         sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+            elif afktype == "sticker":
+                # ✅ FIX: Handle sticker with button
+                if data:
+                    sent_msg = await message.reply_sticker(sticker=data)
+                    # Send text with button separately
+                    await asyncio.sleep(0.5)
+                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                else:
+                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             else:
                 sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
             await track_message_for_deletion(sent_msg)
@@ -793,7 +802,7 @@ async def afk_handler(_, message: Message):
                 except Exception:
                     details.update({"type": "photo", "data": None, "time": time.time()})
             elif rm.sticker:
-                # store sticker file_id (works for static stickers)
+                # ✅ FIX: Properly handle sticker reply
                 try:
                     details.update({"type": "sticker", "data": rm.sticker.file_id, "time": time.time()})
                 except Exception:
@@ -868,7 +877,7 @@ async def afk_watcher(_, message: Message):
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
-            elif afktype in ("photo", "sticker"):
+            elif afktype == "photo":
                 if data:
                     sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
                 else:
@@ -877,12 +886,21 @@ async def afk_watcher(_, message: Message):
                         sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
                     else:
                         sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+            elif afktype == "sticker":
+                # ✅ FIX: Handle sticker with button in watcher
+                if data:
+                    sent_msg = await message.reply_sticker(sticker=data)
+                    # Send text with button separately
+                    await asyncio.sleep(0.5)
+                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                else:
+                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
             else:
                 sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return watcher: {e}")
-            sent_msg = await message.reply_text(f"**{user_name}** is now available again")
+            sent_msg = await message.reply_text(f"**{user_name}** is now available again after some time", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]]))
             await track_message_for_deletion(sent_msg)
 
     # Check if replying to AFK user
@@ -898,13 +916,13 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"**{replied_user.first_name}**has been away for💤 {seenago}"
+                base_text = f"**{replied_user.first_name}** has been away for💤 {seenago}"
                 if reasonafk:
                     base_text += f"\n\nReason: `{reasonafk}`"
 
                 if afktype == "animation" and data:
                     sent_msg = await message.reply_animation(data, caption=base_text)
-                elif afktype in ("photo", "sticker"):
+                elif afktype == "photo":
                     if data:
                         sent_msg = await message.reply_photo(photo=data, caption=base_text)
                     else:
@@ -913,6 +931,14 @@ async def afk_watcher(_, message: Message):
                             sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
                         else:
                             sent_msg = await message.reply_text(base_text)
+                elif afktype == "sticker":
+                    # ✅ FIX: Handle sticker reply mention
+                    if data:
+                        sent_msg = await message.reply_sticker(sticker=data)
+                        await asyncio.sleep(0.5)
+                        await message.reply_text(base_text)
+                    else:
+                        sent_msg = await message.reply_text(base_text)
                 else:
                     sent_msg = await message.reply_text(base_text)
                 await track_message_for_deletion(sent_msg)
@@ -943,13 +969,13 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"**{user_obj.first_name}**has been away for💤 {seenago}"
+                        base_text = f"**{user_obj.first_name}** has been away for💤 {seenago}"
                         if reasonafk:
                             base_text += f"\n\nReason: `{reasonafk}`"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
-                        elif afktype in ("photo", "sticker"):
+                        elif afktype == "photo":
                             if data:
                                 sent_msg = await message.reply_photo(photo=data, caption=base_text)
                             else:
@@ -958,6 +984,14 @@ async def afk_watcher(_, message: Message):
                                     sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
                                 else:
                                     sent_msg = await message.reply_text(base_text)
+                        elif afktype == "sticker":
+                            # ✅ FIX: Handle sticker mention
+                            if data:
+                                sent_msg = await message.reply_sticker(sticker=data)
+                                await asyncio.sleep(0.5)
+                                await message.reply_text(base_text)
+                            else:
+                                sent_msg = await message.reply_text(base_text)
                         else:
                             sent_msg = await message.reply_text(base_text)
                         await track_message_for_deletion(sent_msg)
@@ -980,7 +1014,7 @@ async def afk_watcher(_, message: Message):
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
-                        elif afktype in ("photo", "sticker"):
+                        elif afktype == "photo":
                             if data:
                                 sent_msg = await message.reply_photo(photo=data, caption=base_text)
                             else:
@@ -989,6 +1023,14 @@ async def afk_watcher(_, message: Message):
                                     sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
                                 else:
                                     sent_msg = await message.reply_text(base_text)
+                        elif afktype == "sticker":
+                            # ✅ FIX: Handle sticker text mention
+                            if data:
+                                sent_msg = await message.reply_sticker(sticker=data)
+                                await asyncio.sleep(0.5)
+                                await message.reply_text(base_text)
+                            else:
+                                sent_msg = await message.reply_text(base_text)
                         else:
                             sent_msg = await message.reply_text(base_text)
                         await track_message_for_deletion(sent_msg)
