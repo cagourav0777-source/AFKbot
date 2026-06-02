@@ -962,131 +962,6 @@ async def leaderboard_command(_, message: Message):
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
     await track_message_for_deletion(sent_msg)
 
-# ✅ NEW: View Highest AFK with achievements
-@app.on_callback_query(filters.regex(r"^view_highest_afk_"))
-async def view_highest_afk_callback(_, query: CallbackQuery):
-    """Handle the 'View Highest AFK' button click with detailed stats"""
-    try:
-        user_id = query.from_user.id
-        user = query.from_user
-        user_name = user.first_name or "User"
-        
-        highest_afk = await get_highest_afk_duration(user_id)
-        
-        user_data = await users_collection.find_one({"user_id": user_id})
-        total_afk_time = user_data.get("total_afk_time", 0) if user_data else 0
-        
-        afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
-        total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
-        
-        avg_afk = (total_afk_time // total_afks) if total_afks > 0 else 0
-        
-        # Check achievements
-        new_achievements = await check_and_unlock_achievements(user_id)
-        unlocked = await get_user_achievements(user_id)
-        
-        if highest_afk > 0:
-            highest_readable = get_readable_time(highest_afk)
-            total_readable = get_readable_time(total_afk_time)
-            avg_readable = get_readable_time(avg_afk)
-            
-            response_text = (
-                f"🥇 <b>{user_name}</b>\n"
-                f"{'─' * 40}\n\n"
-                f"📊 <b>AFK Statistics</b>\n\n"
-                f"⏱️  <b>Longest AFK:</b> <code>{highest_readable}</code>\n"
-                f"⏳ <b>Total AFK Time:</b> <code>{total_readable}</code>\n"
-                f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
-                f"📈 <b>Average AFK:</b> <code>{avg_readable}</code>\n\n"
-            )
-            
-            if new_achievements:
-                response_text += f"🎉 <b>New Achievements Unlocked!</b>\n"
-                for ach_key in new_achievements:
-                    if ach_key in ACHIEVEMENTS:
-                        ach = ACHIEVEMENTS[ach_key]
-                        response_text += f"   {ach['emoji']} {ach['name']}\n"
-                response_text += "\n"
-            
-            response_text += f"🏅 <b>Achievements:</b> <code>{len(unlocked)}</code> unlocked"
-        else:
-            response_text = (
-                f"🥇 <b>{user_name}</b>\n"
-                f"{'─' * 40}\n\n"
-                f"❌ <b>No AFK Records Yet</b>\n\n"
-                f"Go AFK first to create a record! 📍"
-            )
-        
-        await query.answer()
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back", callback_data=f"back_from_stats_{user_id}")]
-        ])
-        
-        await query.message.edit_text(
-            text=response_text,
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=keyboard
-        )
-        
-        logger.info(f"User {user_id} viewed their AFK stats")
-        
-    except Exception as e:
-        logger.error(f"Error in view_highest_afk_callback: {e}")
-        await query.answer(f"❌ Error fetching AFK stats", show_alert=True)
-
-# Back from stats callback
-@app.on_callback_query(filters.regex(r"^back_from_stats_"))
-async def back_from_stats_callback(_, query: CallbackQuery):
-    """Go back from AFK stats"""
-    try:
-        user_id = query.from_user.id
-        user_name = query.from_user.first_name or "User"
-        
-        await query.answer()
-        
-        verifier, reasondb = await is_afk(user_id)
-        
-        if verifier:
-            afk_start = reasondb.get("time", time.time())
-            try:
-                afk_duration = int(time.time() - float(afk_start))
-            except Exception:
-                afk_duration = 0
-            
-            timeafk = reasondb.get("time", afk_start)
-            reasonafk = reasondb.get("reason", None)
-            seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
-            
-            base_text = f"🌟 <b>Welcome Back!</b>\n\n<b>{user_name}</b> has returned after being AFK for <code>{seenago}</code>"
-            if reasonafk:
-                base_text += f"\n\n📝 <b>AFK Reason:</b> <code>{reasonafk}</code>"
-            base_text += "\n\n✅ <b>Status: Online</b>"
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
-            ])
-            
-            await query.message.edit_text(
-                text=base_text,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=keyboard
-            )
-        else:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
-            ])
-            
-            await query.message.edit_text(
-                text=f"🌟 <b>Welcome Back!</b>\n\n<b>{user_name}</b> is now online! ✅",
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=keyboard
-            )
-        
-    except Exception as e:
-        logger.error(f"Error in back_from_stats_callback: {e}")
-        await query.answer(f"❌ Error", show_alert=True)
-
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
 async def afk_handler(_, message: Message):
@@ -1146,31 +1021,26 @@ async def afk_handler(_, message: Message):
                 base_text += f"\n\n📝 **AFK Reason:** `{reasonafk}`"
             base_text += "\n\n✅ Status: **Online**"
 
-            keyboard = [
-                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
             if afktype == "animation" and data:
-                sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
+                sent_msg = await message.reply_animation(data, caption=base_text)
             elif afktype == "photo":
                 if data:
-                    sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_photo(photo=data, caption=base_text)
                 else:
                     local_path = f"downloads/{user_id}.jpg"
                     if os.path.exists(local_path):
-                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
+                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
                     else:
-                        sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                        sent_msg = await message.reply_text(base_text)
             elif afktype == "sticker":
                 if data:
                     sent_msg = await message.reply_sticker(sticker=data)
                     await asyncio.sleep(0.5)
-                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_text(base_text)
                 else:
-                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_text(base_text)
             else:
-                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
+                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return: {e}")
@@ -1274,35 +1144,30 @@ async def afk_watcher(_, message: Message):
             if reasonafk:
                 base_text += f"\n\nReason: `{reasonafk}`"
 
-            keyboard = [
-                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
             if afktype == "animation" and data:
-                sent_msg = await message.reply_animation(data, caption=base_text, reply_markup=reply_markup)
+                sent_msg = await message.reply_animation(data, caption=base_text)
             elif afktype == "photo":
                 if data:
-                    sent_msg = await message.reply_photo(photo=data, caption=base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_photo(photo=data, caption=base_text)
                 else:
                     local_path = f"downloads/{userid}.jpg"
                     if os.path.exists(local_path):
-                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text, reply_markup=reply_markup)
+                        sent_msg = await message.reply_photo(photo=local_path, caption=base_text)
                     else:
-                        sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                        sent_msg = await message.reply_text(base_text)
             elif afktype == "sticker":
                 if data:
                     sent_msg = await message.reply_sticker(sticker=data)
                     await asyncio.sleep(0.5)
-                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_text(base_text)
                 else:
-                    sent_msg = await message.reply_text(base_text, reply_markup=reply_markup)
+                    sent_msg = await message.reply_text(base_text)
             else:
-                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True, reply_markup=reply_markup)
+                sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
             await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return watcher: {e}")
-            sent_msg = await message.reply_text(f"**{user_name}** is now available again after some time", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{userid}")]]))
+            sent_msg = await message.reply_text(f"**{user_name}** is now available again after some time")
             await track_message_for_deletion(sent_msg)
 
     if message.reply_to_message and message.reply_to_message.from_user:
