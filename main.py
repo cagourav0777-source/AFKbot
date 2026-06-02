@@ -403,6 +403,15 @@ async def start_command(_, message: Message):
         "Let's get started! 🚀"
     )
 
+    try:
+        await message.reply_photo(
+            photo="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
+            caption=text,
+            reply_markup=keyboard,
+        )
+    except Exception:
+        await message.reply_text(text, reply_markup=keyboard)
+
 # Help callback handler
 @app.on_callback_query(filters.regex("^help$"))
 async def help_callback(_, query: CallbackQuery):
@@ -467,6 +476,21 @@ async def back_callback(_, query: CallbackQuery):
         "━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━\n\n"
         "Let's get started! 🚀"
     )
+
+      try:
+        await query.message.edit_media(
+            media=InputMediaPhoto(
+                media="https://i.ibb.co/kVYPDqRC/tmp5h-atl08.jpg",
+                caption=text,
+            ),
+            reply_markup=keyboard,
+        )
+    except Exception:
+        try:
+            await query.message.edit_text(text, reply_markup=keyboard)
+        except Exception:
+            await query.message.reply_text(text, reply_markup=keyboard)
+
 
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
