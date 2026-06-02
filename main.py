@@ -142,8 +142,15 @@ async def store_afk_duration(user_id: int, afk_duration: int):
                         "$set": {
                             "highest_afk": afk_duration,
                             "last_updated": datetime.utcnow()
-                        }
+                        },
+                        "$inc": {"total_afks": 1}
                     }
+                )
+            else:
+                # Just increment total_afks
+                await afk_stats_collection.update_one(
+                    {"user_id": user_id},
+                    {"$inc": {"total_afks": 1}}
                 )
         else:
             # New user - create entry
@@ -538,50 +545,128 @@ async def back_callback(_, query: CallbackQuery):
             disable_web_page_preview=True
          )
 
-# ✅ NEW: Handle "View Highest AFK" button callback
+# ✅ UPDATED: Handle "View Highest AFK" button callback with detailed stats
 @app.on_callback_query(filters.regex(r"^view_highest_afk_"))
 async def view_highest_afk_callback(_, query: CallbackQuery):
-    """Handle the 'View Highest AFK' button click"""
+    """Handle the 'View Highest AFK' button click with detailed stats"""
     try:
         user_id = query.from_user.id
-        user_name = query.from_user.first_name or "User"
+        user = query.from_user
+        user_name = user.first_name or "User"
         
         # Get the highest AFK duration from database
         highest_afk = await get_highest_afk_duration(user_id)
         
+        # Get total AFK time from users collection
+        user_data = await users_collection.find_one({"user_id": user_id})
+        total_afk_time = user_data.get("total_afk_time", 0) if user_data else 0
+        
+        # Get AFK stats from afk_stats collection
+        afk_stats = await afk_stats_collection.find_one({"user_id": user_id})
+        total_afks = afk_stats.get("total_afks", 0) if afk_stats else 0
+        
+        # Calculate average AFK
+        avg_afk = (total_afk_time // total_afks) if total_afks > 0 else 0
+        
         if highest_afk > 0:
             # Convert seconds to readable format
-            readable_time = get_readable_time(highest_afk)
+            highest_readable = get_readable_time(highest_afk)
+            total_readable = get_readable_time(total_afk_time)
+            avg_readable = get_readable_time(avg_afk)
+            
             response_text = (
-                f"📊 **{user_name}'s AFK Statistics**\n\n"
-                f"⏱️ **Highest AFK Duration:** `{readable_time}`\n\n"
-                f"⌛ **Duration in Seconds:** `{highest_afk}s`"
+                f"🥇 <b>{user_name}</b>\n"
+                f"{'─' * 40}\n\n"
+                f"📊 <b>AFK Statistics</b>\n\n"
+                f"⏱️  <b>Longest AFK:</b> <code>{highest_readable}</code>\n"
+                f"⏳ <b>Total AFK Time:</b> <code>{total_readable}</code>\n"
+                f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
+                f"📈 <b>Average AFK:</b> <code>{avg_readable}</code>\n"
             )
         else:
             response_text = (
-                f"📊 **{user_name}'s AFK Statistics**\n\n"
-                f"❌ No AFK records found yet.\n"
-                f"Go AFK first to create a record!"
+                f"🥇 <b>{user_name}</b>\n"
+                f"{'─' * 40}\n\n"
+                f"❌ <b>No AFK Records Yet</b>\n\n"
+                f"Go AFK first to create a record! 📍"
             )
         
         # Remove the loading state
         await query.answer()
         
+        # Create back button
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back", callback_data=f"back_from_stats_{user_id}")]
+        ])
+        
         # Edit the message to show the stats
         await query.message.edit_text(
             text=response_text,
-            parse_mode=enums.ParseMode.HTML
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=keyboard
         )
         
-        logger.info(f"User {user_id} viewed their highest AFK")
+        logger.info(f"User {user_id} viewed their AFK stats")
         
     except Exception as e:
         logger.error(f"Error in view_highest_afk_callback: {e}")
-        # Show error message
-        await query.answer(
-            f"❌ Error fetching AFK stats", 
-            show_alert=True
-        )
+        await query.answer(f"❌ Error fetching AFK stats", show_alert=True)
+
+# ✅ NEW: Back from stats callback handler
+@app.on_callback_query(filters.regex(r"^back_from_stats_"))
+async def back_from_stats_callback(_, query: CallbackQuery):
+    """Go back from AFK stats to welcome back message"""
+    try:
+        user_id = query.from_user.id
+        user_name = query.from_user.first_name or "User"
+        
+        await query.answer()
+        
+        # Get AFK data
+        verifier, reasondb = await is_afk(user_id)
+        
+        if verifier:
+            # User still AFK - show welcome back message
+            afk_start = reasondb.get("time", time.time())
+            try:
+                afk_duration = int(time.time() - float(afk_start))
+            except Exception:
+                afk_duration = 0
+            
+            timeafk = reasondb.get("time", afk_start)
+            reasonafk = reasondb.get("reason", None)
+            seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
+            
+            base_text = f"🌟 <b>Welcome Back!</b>\n\n<b>{user_name}</b> has returned after being AFK for <code>{seenago}</code>"
+            if reasonafk:
+                base_text += f"\n\n📝 <b>AFK Reason:</b> <code>{reasonafk}</code>"
+            base_text += "\n\n✅ <b>Status: Online</b>"
+            
+            # Recreate button
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
+            ])
+            
+            await query.message.edit_text(
+                text=base_text,
+                parse_mode=enums.ParseMode.HTML,
+                reply_markup=keyboard
+            )
+        else:
+            # User not AFK - show default message
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 View Highest AFK", callback_data=f"view_highest_afk_{user_id}")]
+            ])
+            
+            await query.message.edit_text(
+                text=f"🌟 <b>Welcome Back!</b>\n\n<b>{user_name}</b> is now online! ✅",
+                parse_mode=enums.ParseMode.HTML,
+                reply_markup=keyboard
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in back_from_stats_callback: {e}")
+        await query.answer(f"❌ Error", show_alert=True)
         
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
