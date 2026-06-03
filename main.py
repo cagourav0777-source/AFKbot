@@ -985,7 +985,7 @@ async def afk_watcher(_, message: Message):
             base_text = f"✨ **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗕𝗔𝗖𝗞!** ✨\n═━═━═━═━══━═━═━══━═━═━═━═\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
                 base_text += f"📝 **Reason:** `{reasonafk}`\n"
-            base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🟢 **𝐒𝐭𝐚𝐭𝐮𝐬:** �𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞"
+            base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🟢 **𝐒𝐭𝐚𝐭𝐮𝐬:** 𝗔𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
