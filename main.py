@@ -56,7 +56,6 @@ afk_collection = db.afk
 users_collection = db.users
 groups_collection = db.groups
 broadcast_collection = db.broadcast_tmp
-auto_delete_collection = db.auto_delete
 afk_stats_collection = db.afk_stats
 achievements_collection = db.achievements
 global_king_collection = db.global_king
@@ -347,156 +346,6 @@ async def get_all_groups():
         groups.append(group)
     return groups
 
-# =======================================================================
-# Auto-delete feature implementation (Per Group Settings)
-# =======================================================================
-async def init_group_auto_delete_settings(chat_id: int):
-    """Initialize auto-delete settings for a group with default values"""
-    settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-    if not settings:
-        await auto_delete_collection.insert_one({
-            "type": "group_settings",
-            "chat_id": chat_id,
-            "enabled": False,
-            "delete_after": 300
-        })
-        logger.info(f"Initialized auto-delete settings for group {chat_id}")
-
-async def is_auto_delete_enabled(chat_id: int):
-    settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-    if settings:
-        return settings.get("enabled", False)
-    return False
-
-async def get_auto_delete_time(chat_id: int):
-    settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-    if settings:
-        return settings.get("delete_after", 300)
-    return 300
-
-async def toggle_auto_delete(chat_id: int, state: bool = None):
-    settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-    if not settings:
-        await init_group_auto_delete_settings(chat_id)
-        settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-
-    if state is None:
-        new_state = not settings.get("enabled", False)
-    else:
-        new_state = bool(state)
-
-    await auto_delete_collection.update_one(
-        {"chat_id": chat_id},
-        {"$set": {"enabled": new_state}},
-        upsert=True
-    )
-    logger.info(f"Auto-delete toggled to {new_state} for group {chat_id}")
-    return new_state
-
-async def set_auto_delete_time(chat_id: int, seconds: int):
-    await auto_delete_collection.update_one(
-        {"chat_id": chat_id},
-        {"$set": {"delete_after": seconds}},
-        upsert=True
-    )
-    minutes = seconds // 60
-    logger.info(f"Auto-delete time set to {minutes} minutes for group {chat_id}")
-    return seconds
-
-async def track_message_for_deletion(message: Message):
-    """Track a message for future deletion based on group settings"""
-    if not message or not getattr(message, "chat", None):
-        return
-    if message.chat.type not in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        return
-
-    chat_id = message.chat.id
-
-    if not await is_auto_delete_enabled(chat_id):
-        return
-
-    delete_after = await get_auto_delete_time(chat_id)
-    delete_at = time.time() + delete_after
-
-    await auto_delete_collection.insert_one({
-        "type": "message",
-        "message_id": message.id,
-        "chat_id": chat_id,
-        "delete_at": delete_at
-    })
-    logger.debug(f"Tracking message for deletion: {message.id} in chat {chat_id}")
-
-async def auto_delete_loop():
-    """Background task to delete expired messages"""
-    logger.info("Auto-delete task started")
-    while True:
-        try:
-            current_time = time.time()
-            query = {"type": "message", "delete_at": {"$lte": current_time}}
-            messages_to_delete = await auto_delete_collection.find(query).to_list(length=None)
-
-            if messages_to_delete:
-                logger.info(f"Found {len(messages_to_delete)} messages to delete")
-
-            for msg in messages_to_delete:
-                try:
-                    await app.delete_messages(msg["chat_id"], msg["message_id"])
-                    logger.debug(f"Deleted message: {msg['message_id']} in chat {msg['chat_id']}")
-                except Exception as e:
-                    logger.debug(f"Failed to delete message {msg.get('message_id')} in {msg.get('chat_id')}: {e}")
-                finally:
-                    await auto_delete_collection.delete_one({"_id": msg["_id"]})
-
-            await asyncio.sleep(30)
-        except Exception as e:
-            logger.error(f"Error in auto-delete loop: {e}")
-            await asyncio.sleep(60)
-
-# Helper function to generate auto-delete menu for a group
-async def get_auto_delete_menu(chat_id: int):
-    settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-    if not settings:
-        await init_group_auto_delete_settings(chat_id)
-        settings = await auto_delete_collection.find_one({"chat_id": chat_id})
-
-    enabled = settings.get("enabled", False)
-    delete_after = settings.get("delete_after", 300)
-    minutes = delete_after // 60
-
-    status = "🟢 Enabled" if enabled else "🔴 Disabled"
-
-    text = (
-        f"🤖 **Auto-Delete Settings for This Group**\n\n"
-        f"• Status: {status}\n"
-        f"• Delete after: `{minutes} minutes`\n\n"
-        "**Set Time (minutes):**"
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🟢 Enable", callback_data=f"autodel_enable:{chat_id}"),
-            InlineKeyboardButton("🔴 Disable", callback_data=f"autodel_disable:{chat_id}")
-        ],
-        [
-            InlineKeyboardButton("5 min", callback_data=f"autodel_time:300:{chat_id}"),
-            InlineKeyboardButton("10 min", callback_data=f"autodel_time:600:{chat_id}")
-        ],
-        [
-            InlineKeyboardButton("30 min", callback_data=f"autodel_time:1800:{chat_id}"),
-            InlineKeyboardButton("60 min", callback_data=f"autodel_time:3600:{chat_id}")
-        ],
-        [
-            InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_start"),
-            InlineKeyboardButton("❌ Close", callback_data=f"autodel_close:{chat_id}")
-        ]
-    ])
-
-    return text, keyboard
-
-# =======================================================================
-# End of auto-delete feature
-# =======================================================================
-
 # Create Flask server for health checks
 flask_app = Flask(__name__)
 
@@ -552,7 +401,6 @@ async def new_chat_members(_, message: Message):
         if member.id == me.id:
             await track_group(message.chat.id, message.chat.title)
             logger.info(f"Bot added to group: {message.chat.title} ({message.chat.id})")
-            await init_group_auto_delete_settings(message.chat.id)
 
 # Start command handler
 @app.on_message(filters.command(["start"]))
@@ -565,7 +413,6 @@ async def start_command(_, message: Message):
 
     if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await track_group(message.chat.id, message.chat.title)
-        await init_group_auto_delete_settings(message.chat.id)
 
     await add_user(user.id, user.first_name or "", user.username or "")
 
@@ -690,7 +537,6 @@ async def afk_achievements_command(_, message: Message):
     if not unlocked_achievements:
         text = f"📭 **{user_name}**, you haven't unlocked any achievements yet!\n\nGo AFK to unlock them! 🚀"
         sent_msg = await message.reply_text(text)
-        await track_message_for_deletion(sent_msg)
         return
     
     text = f"🏅 **{user_name}'s Achievements**\n\n"
@@ -707,7 +553,6 @@ async def afk_achievements_command(_, message: Message):
     ])
     
     sent_msg = await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
-    await track_message_for_deletion(sent_msg)
 
 # ✅ FIXED: View My Records callback
 @app.on_callback_query(filters.regex(r"^view_my_records_"))
@@ -823,7 +668,6 @@ async def my_records_command(_, message: Message):
     ])
     
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=keyboard)
-    await track_message_for_deletion(sent_msg)
 
 # ✅ Show achievements from my_records
 @app.on_callback_query(filters.regex(r"^show_achievements_"))
@@ -913,7 +757,6 @@ async def afk_king_command(_, message: Message):
         )
     
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
-    await track_message_for_deletion(sent_msg)
 
 # ✅ NEW: Group AFK King Command
 @app.on_message(filters.command("group_king") & filters.group)
@@ -934,7 +777,6 @@ async def group_king_command(_, message: Message):
         )
     
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
-    await track_message_for_deletion(sent_msg)
 
 # ✅ NEW: Leaderboard Command
 @app.on_message(filters.command("leaderboard") & filters.group)
@@ -947,7 +789,6 @@ async def leaderboard_command(_, message: Message):
     if not top_users:
         text = "📈 <b>AFK Leaderboard</b>\n\nNo records yet!"
         sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
-        await track_message_for_deletion(sent_msg)
         return
     
     text = "📈 <b>Global AFK Leaderboard</b>\n\n"
@@ -966,7 +807,6 @@ async def leaderboard_command(_, message: Message):
             text += f"{idx}. <b>{first_name}</b> - {readable_time}\n"
     
     sent_msg = await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
-    await track_message_for_deletion(sent_msg)
 
 # AFK handler
 @app.on_message(filters.command(["afk"], prefixes=["/", "!"]) | filters.regex(r"^brb\b", re.IGNORECASE))
@@ -986,7 +826,6 @@ async def afk_handler(_, message: Message):
 
     if message.chat and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await track_group(message.chat.id, message.chat.title)
-        await init_group_auto_delete_settings(message.chat.id)
 
     await add_user(user_id, user.first_name or "", user.username or "")
 
@@ -1022,10 +861,10 @@ async def afk_handler(_, message: Message):
             reasonafk = reasondb.get("reason", None)
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
+            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
                 base_text += f"📝 **Reason:** `{reasonafk}`\n"
-            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
+            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1047,11 +886,9 @@ async def afk_handler(_, message: Message):
                     sent_msg = await message.reply_text(base_text)
             else:
                 sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
-            await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return: {e}")
             sent_msg = await message.reply_text(f"🌟 **Welcome Back!**\n\n**{user.first_name}** has returned after being AFK for {seenago}", disable_web_page_preview=True)
-            await track_message_for_deletion(sent_msg)
         return
 
     details = {
@@ -1095,12 +932,11 @@ async def afk_handler(_, message: Message):
         logger.error(f"Error while extracting media for AFK: {e}")
 
     await add_afk(user_id, details)
-    response = f"✨ **AFK Mode Activated** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now away from keyboard\n"
+    response = f"✨ **AFK Mode Activated** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now away from keyboard\n"
     if details.get("reason"):
         response += f"📝 **Reason:** `{details['reason']}`\n"
-    response += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** Away"
+    response += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** Away"
     sent_msg = await message.reply_text(response)
-    await track_message_for_deletion(sent_msg)
 
 # AFK watcher
 @app.on_message(
@@ -1116,7 +952,6 @@ async def afk_watcher(_, message: Message):
 
     if message.chat:
         await track_group(message.chat.id, message.chat.title)
-        await init_group_auto_delete_settings(message.chat.id)
 
     await add_user(userid, message.from_user.first_name or "", message.from_user.username or "")
 
@@ -1147,10 +982,10 @@ async def afk_watcher(_, message: Message):
             reasonafk = reasondb.get("reason")
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
+            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
                 base_text += f"📝 **Reason:** `{reasonafk}`\n"
-            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
+            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1172,11 +1007,9 @@ async def afk_watcher(_, message: Message):
                     sent_msg = await message.reply_text(base_text)
             else:
                 sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
-            await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK return watcher: {e}")
             sent_msg = await message.reply_text(f"**{user_name}** is now available again after some time")
-            await track_message_for_deletion(sent_msg)
 
     if message.reply_to_message and message.reply_to_message.from_user:
         try:
@@ -1190,10 +1023,10 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"💤 **{replied_user.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                base_text = f"💤 **{replied_user.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                 if reasonafk:
                     base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                 if afktype == "animation" and data:
                     sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1215,7 +1048,6 @@ async def afk_watcher(_, message: Message):
                         sent_msg = await message.reply_text(base_text)
                 else:
                     sent_msg = await message.reply_text(base_text)
-                await track_message_for_deletion(sent_msg)
         except Exception as e:
             logger.error(f"Error in AFK reply watcher: {e}")
 
@@ -1242,10 +1074,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
                             base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1267,7 +1099,6 @@ async def afk_watcher(_, message: Message):
                                 sent_msg = await message.reply_text(base_text)
                         else:
                             sent_msg = await message.reply_text(base_text)
-                        await track_message_for_deletion(sent_msg)
 
                 elif entity.type == enums.MessageEntityType.TEXT_MENTION:
                     user_obj = entity.user
@@ -1281,10 +1112,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
                             base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1306,7 +1137,6 @@ async def afk_watcher(_, message: Message):
                                 sent_msg = await message.reply_text(base_text)
                         else:
                             sent_msg = await message.reply_text(base_text)
-                        await track_message_for_deletion(sent_msg)
             except Exception as e:
                 logger.error(f"Error handling mention: {e}")
 
@@ -1327,7 +1157,6 @@ async def stats_command(_, message: Message):
     )
 
     sent_msg = await message.reply_text(stats_text)
-    await track_message_for_deletion(sent_msg)
 
 # Top AFK command
 @app.on_message(filters.command("topafk"))
@@ -1354,7 +1183,6 @@ async def top_afk_command(_, message: Message):
         text += f"{idx}. **{name_display}** – {time_str}\n"
 
     sent_msg = await message.reply_text(text)
-    await track_message_for_deletion(sent_msg)
 
 # Broadcast command (Owner only)
 @app.on_message(filters.command("broadcast"))
@@ -1394,14 +1222,15 @@ async def broadcast_command(_, message: Message):
     # Send to groups
     for group in groups:
         try:
+            # Try to send message to group
             await app.send_message(group["chat_id"], broadcast_text)
             total_sent += 1
-            await asyncio.sleep(0.1)  # Small delay to avoid flood limits
+            await asyncio.sleep(0.2)  # Slightly longer delay for groups
         except Exception as e:
             logger.error(f"Failed to send to group {group['chat_id']}: {e}")
             total_failed += 1
             # Mark invalid groups for cleanup
-            if "PeerIdInvalid" in str(e) or "PEER_ID_INVALID" in str(e):
+            if "PeerIdInvalid" in str(e) or "PEER_ID_INVALID" in str(e) or "ChatWriteForbidden" in str(e):
                 invalid_groups.append(group["chat_id"])
 
     # Send to users
@@ -1447,121 +1276,10 @@ async def broadcast_command(_, message: Message):
         f"{cleanup_msg}"
     )
 
-# Auto-delete menu command
-@app.on_message(filters.command(["autodel", "autodelete"]) & filters.group)
-async def auto_delete_menu(_, message: Message):
-    chat_id = message.chat.id
-    await init_group_auto_delete_settings(chat_id)
-
-    try:
-        member = await app.get_chat_member(chat_id, message.from_user.id)
-        if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-            await message.reply_text("Administrator access is required to manage auto-delete settings 🔒")
-            return
-    except Exception as e:
-        logger.error(f"Admin check error: {e}")
-        await message.reply_text("❌ Failed to verify admin status")
-        return
-
-    text, keyboard = await get_auto_delete_menu(chat_id)
-    sent_msg = await message.reply_text(text, reply_markup=keyboard)
-    await track_message_for_deletion(sent_msg)
-
-# Auto-delete callback handler
-@app.on_callback_query(filters.regex(r"^autodel_"))
-async def auto_delete_callback(_, query: CallbackQuery):
-    """Handle auto-delete callback actions with group-specific settings"""
-    try:
-        data = query.data
-
-        if data.startswith("autodel_time:"):
-            parts = data.split(':')
-            if len(parts) < 3:
-                await query.answer("Invalid data", show_alert=True)
-                return
-            seconds = int(parts[1])
-            chat_id = int(parts[2])
-            action = "time"
-        else:
-            parts = data.split(':')
-            action = parts[0].replace("autodel_", "")
-            chat_id = int(parts[1]) if len(parts) > 1 else None
-
-        try:
-            member = await app.get_chat_member(chat_id, query.from_user.id)
-            if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                await query.answer("Administrator access is required to use this", show_alert=True)
-                return
-        except Exception as e:
-            logger.error(f"Admin check error: {e}")
-            await query.answer("❌ Permission check failed", show_alert=True)
-            return
-
-        await query.answer()
-
-        if action == "enable":
-            await toggle_auto_delete(chat_id, True)
-            current_time = await get_auto_delete_time(chat_id)
-            minutes = current_time // 60
-            text = (
-                "✅ Auto-delete has been enabled for this group\n\n"
-                f"• Current delete time: `{minutes} minutes`\n\n"
-                "Use the buttons below to manage settings:"
-            )
-            await query.message.edit_text(
-                text,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Back to Menu", callback_data=f"autodel_back:{chat_id}")],
-                    [InlineKeyboardButton("❌ Close", callback_data=f"autodel_close:{chat_id}")]
-                ])
-            )
-
-        elif action == "disable":
-            await toggle_auto_delete(chat_id, False)
-            await query.message.edit_text(
-                "❌ Auto-delete has been disabled for this group\n\n"
-                "Bot messages in this group will no longer be automatically deleted.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Back to Menu", callback_data=f"autodel_back:{chat_id}")],
-                    [InlineKeyboardButton("❌ Close", callback_data=f"autodel_close:{chat_id}")]
-                ])
-            )
-
-        elif action == "time":
-            minutes = seconds // 60
-            await set_auto_delete_time(chat_id, seconds)
-            await toggle_auto_delete(chat_id, True)
-            await query.message.edit_text(
-                f"✅ Auto-delete time set to {minutes} minutes and enabled for this group",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Back to Menu", callback_data=f"autodel_back:{chat_id}")],
-                    [InlineKeyboardButton("❌ Close", callback_data=f"autodel_close:{chat_id}")]
-                ])
-            )
-
-        elif action == "close":
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-
-        elif action == "back":
-            text, keyboard = await get_auto_delete_menu(chat_id)
-            await query.message.edit_text(text, reply_markup=keyboard)
-
-    except Exception as e:
-        logger.error(f"Error in auto-delete callback: {e}")
-        try:
-            await query.answer("An error occurred. Please try again.", show_alert=True)
-        except Exception:
-            pass
-
 # Main execution
 async def main():
     os.makedirs("downloads", exist_ok=True)
     logger.info("Created downloads directory")
-
-    asyncio.create_task(auto_delete_loop())
 
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
