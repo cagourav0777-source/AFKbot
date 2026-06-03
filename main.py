@@ -1386,6 +1386,8 @@ async def broadcast_command(_, message: Message):
 
     total_sent = 0
     total_failed = 0
+    invalid_groups = []
+    invalid_users = []
 
     status_msg = await message.reply_text(f"📢 **Broadcast Started**\n\nSending to {len(groups)} groups and {len(users)} users...")
 
@@ -1398,6 +1400,9 @@ async def broadcast_command(_, message: Message):
         except Exception as e:
             logger.error(f"Failed to send to group {group['chat_id']}: {e}")
             total_failed += 1
+            # Mark invalid groups for cleanup
+            if "PeerIdInvalid" in str(e) or "PEER_ID_INVALID" in str(e):
+                invalid_groups.append(group["chat_id"])
 
     # Send to users
     for user in users:
@@ -1408,6 +1413,29 @@ async def broadcast_command(_, message: Message):
         except Exception as e:
             logger.error(f"Failed to send to user {user['user_id']}: {e}")
             total_failed += 1
+            # Mark invalid users for cleanup
+            if "PEER_ID_INVALID" in str(e) or "INPUT_USER_DEACTIVATED" in str(e):
+                invalid_users.append(user["user_id"])
+
+    # Clean up invalid groups from database
+    if invalid_groups:
+        for group_id in invalid_groups:
+            await groups_collection.delete_one({"chat_id": group_id})
+            logger.info(f"Removed invalid group {group_id} from database")
+
+    # Clean up invalid users from database
+    if invalid_users:
+        for user_id in invalid_users:
+            await users_collection.delete_one({"user_id": user_id})
+            logger.info(f"Removed invalid user {user_id} from database")
+
+    cleanup_msg = ""
+    if invalid_groups or invalid_users:
+        cleanup_msg = f"\n\n🧹 **Cleaned up:**\n"
+        if invalid_groups:
+            cleanup_msg += f"• {len(invalid_groups)} invalid groups\n"
+        if invalid_users:
+            cleanup_msg += f"• {len(invalid_users)} invalid users"
 
     await status_msg.edit_text(
         f"✅ **Broadcast Completed**\n\n"
@@ -1416,6 +1444,7 @@ async def broadcast_command(_, message: Message):
         f"• Total Failed: {total_failed}\n"
         f"• Groups: {len(groups)}\n"
         f"• Users: {len(users)}"
+        f"{cleanup_msg}"
     )
 
 # Auto-delete menu command
