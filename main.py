@@ -555,7 +555,7 @@ async def new_chat_members(_, message: Message):
             await init_group_auto_delete_settings(message.chat.id)
 
 # Start command handler
-@app.on_message(filters.command(["start", "help"]))
+@app.on_message(filters.command(["start"]))
 async def start_command(_, message: Message):
     user = message.from_user
     if not user:
@@ -803,12 +803,18 @@ async def my_records_command(_, message: Message):
     avg_afk = (total_afk // total_afks) if total_afks > 0 else 0
     
     text = (
-        f"📊 <b>{user_name}'s AFK Records</b>\n"
-        f"{'─' * 40}\n\n"
-        f"⏱️  <b>Longest AFK:</b> <code>{get_readable_time(highest_afk)}</code>\n"
-        f"⏳ <b>Total AFK Time:</b> <code>{get_readable_time(total_afk)}</code>\n"
-        f"🔄 <b>AFK Count:</b> <code>{total_afks}</code>\n"
-        f"📈 <b>Average AFK:</b> <code>{get_readable_time(avg_afk)}</code>\n"
+        f"✨ <b>{user_name}'s AFK Statistics</b> ✨\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏆 <b>Longest AFK Session:</b>\n"
+        f"   <code>{get_readable_time(highest_afk)}</code>\n\n"
+        f"⏰ <b>Total AFK Time:</b>\n"
+        f"   <code>{get_readable_time(total_afk)}</code>\n\n"
+        f"🔄 <b>AFK Sessions:</b>\n"
+        f"   <code>{total_afks}</code> times\n\n"
+        f"  <b>Average Duration:</b>\n"
+        f"   <code>{get_readable_time(avg_afk)}</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 Keep tracking your AFK journey!"
     )
     
     keyboard = InlineKeyboardMarkup([
@@ -1016,10 +1022,10 @@ async def afk_handler(_, message: Message):
             reasonafk = reasondb.get("reason", None)
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"🌟 **Welcome Back!**\n\n**{user.first_name}** has returned after being AFK for {seenago}"
+            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
-                base_text += f"\n\n📝 **AFK Reason:** `{reasonafk}`"
-            base_text += "\n\n✅ Status: **Online**"
+                base_text += f"📝 **Reason:** `{reasonafk}`\n"
+            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1089,9 +1095,10 @@ async def afk_handler(_, message: Message):
         logger.error(f"Error while extracting media for AFK: {e}")
 
     await add_afk(user_id, details)
-    response = f"**{user.first_name}** is now away from keyboard🚶"
+    response = f"✨ **AFK Mode Activated** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now away from keyboard\n"
     if details.get("reason"):
-        response += f"\n\nReason: `{details['reason']}`"
+        response += f"📝 **Reason:** `{details['reason']}`\n"
+    response += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** Away"
     sent_msg = await message.reply_text(response)
     await track_message_for_deletion(sent_msg)
 
@@ -1140,9 +1147,10 @@ async def afk_watcher(_, message: Message):
             reasonafk = reasondb.get("reason")
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"🌟 **Welcome Back!**\n\n**{user_name}** is now available again after {seenago}"
+            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
-                base_text += f"\n\nReason: `{reasonafk}`"
+                base_text += f"📝 **Reason:** `{reasonafk}`\n"
+            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1182,9 +1190,10 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"**{replied_user.first_name}** has been away for💤 {seenago}"
+                base_text = f"💤 **{replied_user.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                 if reasonafk:
-                    base_text += f"\n\nReason: `{reasonafk}`"
+                    base_text += f"📝 **Reason:** `{reasonafk}`\n"
+                base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                 if afktype == "animation" and data:
                     sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1233,9 +1242,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"**{user_obj.first_name}** has been away for💤 {seenago}"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
-                            base_text += f"\n\nReason: `{reasonafk}`"
+                            base_text += f"📝 **Reason:** `{reasonafk}`\n"
+                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1271,9 +1281,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"**{user_obj.first_name}** is AFK since {seenago}"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
-                            base_text += f"\n\nReason: `{reasonafk}`"
+                            base_text += f"📝 **Reason:** `{reasonafk}`\n"
+                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1344,6 +1355,68 @@ async def top_afk_command(_, message: Message):
 
     sent_msg = await message.reply_text(text)
     await track_message_for_deletion(sent_msg)
+
+# Broadcast command (Owner only)
+@app.on_message(filters.command("broadcast"))
+async def broadcast_command(_, message: Message):
+    """Broadcast message to all groups and users (Owner only)"""
+    if not OWNER_ID or message.from_user.id != OWNER_ID:
+        await message.reply_text("❌ This command is only for the bot owner.")
+        return
+
+    # Check if it's a reply to a message
+    if message.reply_to_message:
+        broadcast_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    else:
+        # Get text from command
+        parts = message.text.split(" ", 1)
+        if len(parts) < 2:
+            await message.reply_text("❌ Please provide a message to broadcast.\n\nUsage: /broadcast Your message here\nOr reply to a message with /broadcast")
+            return
+        broadcast_text = parts[1]
+
+    if not broadcast_text:
+        await message.reply_text("❌ No message to broadcast.")
+        return
+
+    # Get all groups and users
+    groups = await get_all_groups()
+    users_cursor = users_collection.find({})
+    users = await users_cursor.to_list(length=None)
+
+    total_sent = 0
+    total_failed = 0
+
+    status_msg = await message.reply_text(f"📢 **Broadcast Started**\n\nSending to {len(groups)} groups and {len(users)} users...")
+
+    # Send to groups
+    for group in groups:
+        try:
+            await app.send_message(group["chat_id"], broadcast_text)
+            total_sent += 1
+            await asyncio.sleep(0.1)  # Small delay to avoid flood limits
+        except Exception as e:
+            logger.error(f"Failed to send to group {group['chat_id']}: {e}")
+            total_failed += 1
+
+    # Send to users
+    for user in users:
+        try:
+            await app.send_message(user["user_id"], broadcast_text)
+            total_sent += 1
+            await asyncio.sleep(0.1)  # Small delay to avoid flood limits
+        except Exception as e:
+            logger.error(f"Failed to send to user {user['user_id']}: {e}")
+            total_failed += 1
+
+    await status_msg.edit_text(
+        f"✅ **Broadcast Completed**\n\n"
+        f"📊 **Statistics:**\n"
+        f"• Total Sent: {total_sent}\n"
+        f"• Total Failed: {total_failed}\n"
+        f"• Groups: {len(groups)}\n"
+        f"• Users: {len(users)}"
+    )
 
 # Auto-delete menu command
 @app.on_message(filters.command(["autodel", "autodelete"]) & filters.group)
