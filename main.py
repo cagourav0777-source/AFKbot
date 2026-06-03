@@ -932,7 +932,7 @@ async def afk_handler(_, message: Message):
         logger.error(f"Error while extracting media for AFK: {e}")
 
     await add_afk(user_id, details)
-    response = f"✨ **AFK Mode Activated** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now away from keyboard\n"
+    response = f"✨ **𝐀𝐅𝐊 𝐌𝐎𝐃𝐄 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now away from keyboard\n"
     if details.get("reason"):
         response += f"📝 **Reason:** `{details['reason']}`\n"
     response += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** Away"
