@@ -861,10 +861,10 @@ async def afk_handler(_, message: Message):
             reasonafk = reasondb.get("reason", None)
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user.first_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
+            base_text = f"✨ **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗕𝗔𝗖𝗞!** ✨\n═━═━═━═━══━═━═━══━═━═━═━═\n\n👤 **{user.first_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
                 base_text += f"📝 **Reason:** `{reasonafk}`\n"
-            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
+            base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🟢 **𝐒𝐭𝐚𝐭𝐮𝐬:** 𝐀𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -888,7 +888,7 @@ async def afk_handler(_, message: Message):
                 sent_msg = await message.reply_text(base_text, disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"Error in AFK return: {e}")
-            sent_msg = await message.reply_text(f"🌟 **Welcome Back!**\n\n**{user.first_name}** has returned after being AFK for {seenago}", disable_web_page_preview=True)
+            sent_msg = await message.reply_text(f"🌟 **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗕𝗔𝗖𝗞!**\n\n**{user.first_name}** has returned after being AFK for {seenago}", disable_web_page_preview=True)
         return
 
     details = {
@@ -935,7 +935,7 @@ async def afk_handler(_, message: Message):
     response = f"✨ **𝐀𝐅𝐊 𝐌𝐎𝐃𝐄 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃** ✨\n═━═━═━═━══━═━═━══━═━═━═━═\n\n👤 **{user.first_name}** is now away from keyboard\n"
     if details.get("reason"):
         response += f"📝 **Reason:** `{details['reason']}`\n"
-    response += "═━═━═━═━══━═━═━══━═━═━═━═\n🔴 **Status:** Away"
+    response += "═━═━═━═━══━═━═━══━═━═━═━═\n🔴 **𝐒𝐭𝐚𝐭𝐮𝐬:** 𝐀𝐰𝐚𝐲"
     sent_msg = await message.reply_text(response)
 
 # AFK watcher
@@ -982,10 +982,10 @@ async def afk_watcher(_, message: Message):
             reasonafk = reasondb.get("reason")
             seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-            base_text = f"✨ **Welcome Back!** ✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
+            base_text = f"✨ **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗕𝗔𝗖𝗞!** ✨\n═━═━═━═━══━═━═━══━═━═━═━═\n\n👤 **{user_name}** is now online again!\n\n⏱️ **Away Duration:** {seenago}\n"
             if reasonafk:
                 base_text += f"📝 **Reason:** `{reasonafk}`\n"
-            base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🟢 **Status:** Available"
+            base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🟢 **𝐒𝐭𝐚𝐭𝐮𝐬:** �𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞"
 
             if afktype == "animation" and data:
                 sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1023,10 +1023,10 @@ async def afk_watcher(_, message: Message):
                 reasonafk = reasondb.get("reason")
                 seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                base_text = f"💤 **{replied_user.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                base_text = f"💤 **{replied_user.first_name}** is currently away\n═━═━═━═━══━═━═━══━═━═━═━═\n\n⏱️ **Away for:** {seenago}\n"
                 if reasonafk:
                     base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🔴 **𝐒𝐭𝐚𝐭𝐮𝐬:** 𝐀𝐅𝐊"
 
                 if afktype == "animation" and data:
                     sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1074,10 +1074,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n═━═━═━═━══━═━═━══━═━═━═━═\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
                             base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                        base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🔴 **Status:** 𝐀𝐅𝐊"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
@@ -1112,10 +1112,10 @@ async def afk_watcher(_, message: Message):
                         reasonafk = reasondb.get("reason")
                         seenago = get_readable_time(int(time.time() - float(timeafk))) if timeafk else "some time"
 
-                        base_text = f"💤 **{user_obj.first_name}** is currently away\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⏱️ **Away for:** {seenago}\n"
+                        base_text = f"💤 **{user_obj.first_name}** is currently away\n═━═━═━═━══━═━═━══━═━═━═━═\n\n⏱️ **Away for:** {seenago}\n"
                         if reasonafk:
                             base_text += f"📝 **Reason:** `{reasonafk}`\n"
-                        base_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔴 **Status:** AFK"
+                        base_text += "═━═━═━═━══━═━═━══━═━═━═━═\n🔴 **Status:** 𝐀𝐅𝐊"
 
                         if afktype == "animation" and data:
                             sent_msg = await message.reply_animation(data, caption=base_text)
