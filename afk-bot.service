@@ -1,0 +1,16 @@
+[Unit]
+Description=AFK Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/afk-bot
+Environment="PATH=/home/ubuntu/afk-bot/venv/bin"
+EnvironmentFile=/home/ubuntu/afk-bot/.env
+ExecStart=/home/ubuntu/afk-bot/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
