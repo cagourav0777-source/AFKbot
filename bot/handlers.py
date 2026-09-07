@@ -284,7 +284,10 @@ def register_handlers(app: Client):
             f"🔴 <b>Status:</b> Active (Time will advance naturally)"
         )
 
-        await message.reply_text(response, parse_mode=enums.ParseMode.HTML)
+        try:
+            await message.reply_text(response, parse_mode=enums.ParseMode.HTML)
+        except Exception:
+            await app.send_message(message.chat.id, response, parse_mode=enums.ParseMode.HTML)
 
     @app.on_message(filters.command(["check_afk", "checkafk"], prefixes=["/", "!"]))
     async def check_afk_command(_, message: Message):
@@ -372,6 +375,7 @@ def register_handlers(app: Client):
         except Exception:
             pass
 
+    # ------------------ UPDATED TOP AFK / LEADERBOARD ------------------
     @app.on_message(filters.command(["topafk", "leaderboard"]))
     async def top_afk_command(_, message: Message):
         try:
@@ -385,23 +389,64 @@ def register_handlers(app: Client):
             await message.reply_text("💤 **No users are currently AFK!**")
             return
 
+        # 1. Top users ke IDs collect karo taaki live data fetch ho sake
+        user_ids = [u.get("user_id") for u in top_users if u.get("user_id")]
+        live_users_map = {}
+        if user_ids:
+            try:
+                fetched = await app.get_users(user_ids)
+                if not isinstance(fetched, list):
+                    fetched = [fetched]
+                for fu in fetched:
+                    live_users_map[fu.id] = fu
+            except Exception as e:
+                logger.warning(f"Could not batch fetch live users for leaderboard: {e}")
+
         text = "🏆 **Top 10 Currently AFK Users**\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         for idx, user in enumerate(top_users, start=1):
             user_id = user.get("user_id")
-            first_name = user.get("first_name") or ""
-            username = user.get("username") or ""
             start_time = user.get("start_time", time.time())
             reason = user.get("reason")
+
+            # Live info agar Telegram server se mil gayi ho
+            live_user = live_users_map.get(user_id)
+            if live_user:
+                if getattr(live_user, "is_deleted", False):
+                    first_name = "Deleted Account"
+                    username = ""
+                else:
+                    first_name = live_user.first_name or "User"
+                    username = live_user.username or ""
+
+                # Background me DB ko fresh username/name ke sath update kar do
+                asyncio.create_task(
+                    afk_collection.update_one(
+                        {"user_id": user_id},
+                        {"$set": {"first_name": first_name, "username": username}}
+                    )
+                )
+                asyncio.create_task(
+                    users_collection.update_one(
+                        {"user_id": user_id},
+                        {"$set": {"first_name": first_name, "username": username}}
+                    )
+                )
+            else:
+                first_name = user.get("first_name") or "User"
+                username = user.get("username") or ""
 
             current_duration = int(time.time() - float(start_time)) if start_time else 0
             readable_time = get_readable_time(current_duration)
 
-            if username:
-                name_display = f"@{username}"
-            elif first_name:
-                name_display = f"[{first_name}](tg://user?id={user_id})" if user_id else first_name
+            # Permanent clickable link using tg://user?id= (profile hamesha open hogi)
+            if user_id:
+                name_display = f"[{first_name}](tg://user?id={user_id})"
             else:
-                name_display = f"[User](tg://user?id={user_id})" if user_id else "User"
+                name_display = first_name
+
+            # Agar valid username active hai toh sath me dikhao
+            if username:
+                name_display += f" (@{username})"
 
             reason_str = f" | `{reason}`" if reason else ""
 
@@ -428,7 +473,6 @@ def register_handlers(app: Client):
         user_id = user.id
         user_name = user.first_name or "User"
 
-        # Auto-delete user's command message
         try:
             await message.delete()
         except Exception:
@@ -447,7 +491,6 @@ def register_handlers(app: Client):
             _, _, rem = (message.text or "").partition(" ")
             reason_text = rem.strip() if rem else None
 
-        # Check if already AFK - use atomic operation to prevent race condition
         verifier, reasondb = await is_afk(user_id)
 
         if verifier and reasondb:
@@ -514,7 +557,6 @@ def register_handlers(app: Client):
 
         await add_afk(user_id, details)
 
-        # Send AFK set message
         if details.get("reason"):
             response = MSG_AFK_SET_REASON.format(name=user_name, reason=details['reason'])
         else:
@@ -692,7 +734,6 @@ def register_handlers(app: Client):
             await message.reply_text("❌ This command is only for the bot owner.")
             return
 
-        # Prevent concurrent broadcasts
         if broadcast_lock.locked():
             await message.reply_text("⚠️ A broadcast is already in progress. Please wait.")
             return
@@ -714,7 +755,6 @@ def register_handlers(app: Client):
 
             groups = await get_all_groups()
 
-            # Use cursor iteration instead of loading all users into memory
             unique_groups = list({g["chat_id"]: g for g in groups if "chat_id" in g}.values())
 
             total_sent = 0
@@ -728,7 +768,7 @@ def register_handlers(app: Client):
                 f"📢 **Broadcast Started**\n\nSending to {len(unique_groups)} groups and users..."
             )
 
-            # 1. Send to groups with improved rate limiting
+            # 1. Send to groups
             for group in unique_groups:
                 group_id = group.get("chat_id")
                 if not group_id:
@@ -763,7 +803,7 @@ def register_handlers(app: Client):
                     logger.error(f"Failed to send to group {group_id}: {e}")
                     total_failed += 1
 
-            # 2. Send to users with cursor iteration
+            # 2. Send to users
             user_count = 0
             async for user in users_collection.find({}):
                 user_id = user.get("user_id")
@@ -805,7 +845,6 @@ def register_handlers(app: Client):
                     logger.error(f"Failed to send to user {user_id}: {e}")
                     total_failed += 1
 
-            # Remove only permanently dead / kicked entities
             if invalid_groups:
                 await groups_collection.delete_many({"chat_id": {"$in": invalid_groups}})
                 logger.info(f"Cleaned up {len(invalid_groups)} invalid groups")
