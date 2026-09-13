@@ -24,7 +24,7 @@ from bot.database import (
     is_afk, add_afk, remove_afk, add_user, track_group,
     update_user_afk_time, store_afk_duration,
     get_current_top_afk_users, count_users, count_afk_users, count_groups,
-    get_all_groups,
+    get_all_groups, remove_afk_by_target,
     users_collection, groups_collection, afk_stats_collection, afk_collection
 )
 from bot.constants import (
@@ -80,7 +80,6 @@ def parse_custom_duration(text: str):
             total_seconds += int(val * time_units[unit])
             matched_ranges.append(m.span())
 
-    # Validate max duration
     max_seconds = MAX_AFK_DURATION_YEARS * 365 * SECONDS_PER_DAY
     if total_seconds > max_seconds:
         logger.warning(f"Duration {total_seconds}s exceeds max, capping to {max_seconds}s")
@@ -238,6 +237,63 @@ def register_handlers(app: Client):
                 disable_web_page_preview=True
             )
 
+    # ------------------ OWNER COMMAND: SILENT UNAFK ------------------
+    @app.on_message(filters.command(["unafk", "rmafk"], prefixes=["/", "!"]))
+    async def unafk_command(_, message: Message):
+        if not OWNER_ID or not message.from_user or message.from_user.id != OWNER_ID:
+            await message.reply_text("❌ This command is only for the bot owner.")
+            return
+
+        target = None
+        target_name = "User"
+
+        # 1. Check if replied to a message
+        if message.reply_to_message and message.reply_to_message.from_user:
+            target = message.reply_to_message.from_user.id
+            target_name = message.reply_to_message.from_user.first_name or "User"
+        else:
+            _, _, args = (message.text or "").partition(" ")
+            args = args.strip()
+            if not args:
+                await message.reply_text(
+                    "ℹ️ **Usage:**\n"
+                    "• `/unafk @username`\n"
+                    "• `/unafk user_id`\n"
+                    "• Reply to any user message with `/unafk`"
+                )
+                return
+            target = args
+
+        # Silently remove from database
+        success, afk_doc = await remove_afk_by_target(target)
+
+        if success and afk_doc:
+            user_id = afk_doc.get("user_id")
+            saved_name = afk_doc.get("first_name") or target_name
+            username_display = f" (@{afk_doc['username']})" if afk_doc.get("username") else ""
+
+            # Record final AFK duration to records without notifying user
+            start_time = afk_doc.get("time")
+            if start_time and user_id:
+                try:
+                    duration = int(time.time() - float(start_time))
+                    await store_afk_duration(user_id, duration)
+                    await update_user_afk_time(user_id, duration)
+                except Exception:
+                    pass
+
+            await message.reply_text(
+                f"✅ **AFK Removed Silently**\n\n"
+                f"👤 **User:** [{saved_name}](tg://user?id={user_id}){username_display}\n"
+                f"🆔 **ID:** `{user_id}`\n"
+                f"🤫 *No notification was sent to the user.*",
+                disable_web_page_preview=True
+            )
+        else:
+            await message.reply_text(
+                f"❌ **User not found in active AFK list.**\nTarget: `{target}`"
+            )
+
     # ------------------ SECRET OWNER COMMAND ------------------
     @app.on_message(filters.command(["custom_afk", "setafk"], prefixes=["/", "!"]))
     async def custom_afk_command(_, message: Message):
@@ -389,18 +445,19 @@ def register_handlers(app: Client):
             await message.reply_text("💤 **No users are currently AFK!**")
             return
 
-        # 1. Top users ke IDs collect karo taaki live data fetch ho sake
-        user_ids = [u.get("user_id") for u in top_users if u.get("user_id")]
+        # Fetch live user data individually to avoid PEER_ID_INVALID breaking the whole batch
         live_users_map = {}
-        if user_ids:
+        for u in top_users:
+            uid = u.get("user_id")
+            if not uid:
+                continue
             try:
-                fetched = await app.get_users(user_ids)
-                if not isinstance(fetched, list):
-                    fetched = [fetched]
-                for fu in fetched:
+                fu = await app.get_users(uid)
+                if fu:
                     live_users_map[fu.id] = fu
-            except Exception as e:
-                logger.warning(f"Could not batch fetch live users for leaderboard: {e}")
+            except Exception:
+                # If Telegram doesn't know the peer in current session, safely fallback to DB
+                pass
 
         text = "🏆 **Top 10 Currently AFK Users**\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         for idx, user in enumerate(top_users, start=1):
@@ -408,7 +465,6 @@ def register_handlers(app: Client):
             start_time = user.get("start_time", time.time())
             reason = user.get("reason")
 
-            # Live info agar Telegram server se mil gayi ho
             live_user = live_users_map.get(user_id)
             if live_user:
                 if getattr(live_user, "is_deleted", False):
@@ -418,7 +474,6 @@ def register_handlers(app: Client):
                     first_name = live_user.first_name or "User"
                     username = live_user.username or ""
 
-                # Background me DB ko fresh username/name ke sath update kar do
                 asyncio.create_task(
                     afk_collection.update_one(
                         {"user_id": user_id},
@@ -438,13 +493,11 @@ def register_handlers(app: Client):
             current_duration = int(time.time() - float(start_time)) if start_time else 0
             readable_time = get_readable_time(current_duration)
 
-            # Permanent clickable link using tg://user?id= (profile hamesha open hogi)
             if user_id:
                 name_display = f"[{first_name}](tg://user?id={user_id})"
             else:
                 name_display = first_name
 
-            # Agar valid username active hai toh sath me dikhao
             if username:
                 name_display += f" (@{username})"
 
@@ -585,7 +638,7 @@ def register_handlers(app: Client):
         verifier, reasondb = await is_afk(userid)
         if verifier and reasondb:
             text_lower = ((message.text or "") + " " + (message.caption or "")).lower()
-            if any(cmd in text_lower for cmd in ["/afk", "!afk", "brb", "/check_afk", "!check_afk", "/checkafk", "/custom_afk", "!custom_afk", "/setafk", "!setafk"]):
+            if any(cmd in text_lower for cmd in ["/afk", "!afk", "brb", "/check_afk", "!check_afk", "/checkafk", "/custom_afk", "!custom_afk", "/setafk", "!setafk", "/unafk", "!unafk"]):
                 return
 
             afk_start = reasondb.get("time", time.time())
