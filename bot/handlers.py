@@ -431,7 +431,7 @@ def register_handlers(app: Client):
         except Exception:
             pass
 
-    # ------------------ UPDATED TOP AFK / LEADERBOARD ------------------
+    # ------------------ FIXED TOP AFK / LEADERBOARD ------------------
     @app.on_message(filters.command(["topafk", "leaderboard"]))
     async def top_afk_command(_, message: Message):
         try:
@@ -445,7 +445,7 @@ def register_handlers(app: Client):
             await message.reply_text("💤 **No users are currently AFK!**")
             return
 
-        # Fetch live user data individually to avoid PEER_ID_INVALID breaking the whole batch
+        # Fetch live user data individually to safely avoid PEER_ID_INVALID
         live_users_map = {}
         for u in top_users:
             uid = u.get("user_id")
@@ -456,7 +456,6 @@ def register_handlers(app: Client):
                 if fu:
                     live_users_map[fu.id] = fu
             except Exception:
-                # If Telegram doesn't know the peer in current session, safely fallback to DB
                 pass
 
         text = "🏆 **Top 10 Currently AFK Users**\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -474,18 +473,18 @@ def register_handlers(app: Client):
                     first_name = live_user.first_name or "User"
                     username = live_user.username or ""
 
-                asyncio.create_task(
-                    afk_collection.update_one(
+                # Direct await in try-except instead of create_task to avoid Motor Future error
+                try:
+                    await afk_collection.update_one(
                         {"user_id": user_id},
                         {"$set": {"first_name": first_name, "username": username}}
                     )
-                )
-                asyncio.create_task(
-                    users_collection.update_one(
+                    await users_collection.update_one(
                         {"user_id": user_id},
                         {"$set": {"first_name": first_name, "username": username}}
                     )
-                )
+                except Exception:
+                    pass
             else:
                 first_name = user.get("first_name") or "User"
                 username = user.get("username") or ""
