@@ -431,7 +431,7 @@ def register_handlers(app: Client):
         except Exception:
             pass
 
-    # ------------------ FIXED TOP AFK / LEADERBOARD ------------------
+    # ------------------ CLEAN TOP AFK / LEADERBOARD ------------------
     @app.on_message(filters.command(["topafk", "leaderboard"]))
     async def top_afk_command(_, message: Message):
         try:
@@ -439,13 +439,14 @@ def register_handlers(app: Client):
         except Exception:
             pass
 
-        top_users = await get_current_top_afk_users(10)
+        # Fetch up to 15 to ensure a full top 10 even after filtering deleted accounts
+        top_users = await get_current_top_afk_users(15)
 
         if not top_users:
             await message.reply_text("💤 **No users are currently AFK!**")
             return
 
-        # Fetch live user data individually to safely avoid PEER_ID_INVALID
+        # Fetch live user data individually
         live_users_map = {}
         for u in top_users:
             uid = u.get("user_id")
@@ -459,21 +460,23 @@ def register_handlers(app: Client):
                 pass
 
         text = "🏆 **Top 10 Currently AFK Users**\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        for idx, user in enumerate(top_users, start=1):
+        displayed = 0
+
+        for user in top_users:
             user_id = user.get("user_id")
             start_time = user.get("start_time", time.time())
             reason = user.get("reason")
 
             live_user = live_users_map.get(user_id)
             if live_user:
+                # 1. Agar account delete ho chuka hai toh DB se clean karein aur skip karein
                 if getattr(live_user, "is_deleted", False):
-                    first_name = "Deleted Account"
-                    username = ""
-                else:
-                    first_name = live_user.first_name or "User"
-                    username = live_user.username or ""
+                    await remove_afk(user_id)
+                    continue
 
-                # Direct await in try-except instead of create_task to avoid Motor Future error
+                first_name = live_user.first_name or "User"
+                username = live_user.username or ""
+
                 try:
                     await afk_collection.update_one(
                         {"user_id": user_id},
@@ -489,27 +492,32 @@ def register_handlers(app: Client):
                 first_name = user.get("first_name") or "User"
                 username = user.get("username") or ""
 
+            displayed += 1
             current_duration = int(time.time() - float(start_time)) if start_time else 0
             readable_time = get_readable_time(current_duration)
 
+            # 2. Clickable profile link (tg://user?id=)
             if user_id:
                 name_display = f"[{first_name}](tg://user?id={user_id})"
             else:
                 name_display = first_name
 
+            # Username agar active ho toh hi sath mein dikhayega
             if username:
                 name_display += f" (@{username})"
 
             reason_str = f" | `{reason}`" if reason else ""
 
-            if idx == 1:
-                text += f"🥇 {idx}. **{name_display}** — `{readable_time}`{reason_str}\n"
-            elif idx == 2:
-                text += f"🥈 {idx}. **{name_display}** — `{readable_time}`{reason_str}\n"
-            elif idx == 3:
-                text += f"🥉 {idx}. **{name_display}** — `{readable_time}`{reason_str}\n"
-            else:
-                text += f"🔹 {idx}. **{name_display}** — `{readable_time}`{reason_str}\n"
+            medal = "🥇" if displayed == 1 else "🥈" if displayed == 2 else "🥉" if displayed == 3 else "🔹"
+            text += f"{medal} {displayed}. **{name_display}** — `{readable_time}`{reason_str}\n"
+
+            # Pure 10 users show hone par loop stop
+            if displayed >= 10:
+                break
+
+        if displayed == 0:
+            await message.reply_text("💤 **No users are currently AFK!**")
+            return
 
         await message.reply_text(text, disable_web_page_preview=True)
 
