@@ -1,5 +1,6 @@
 import time
 import logging
+import re
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from bot.config import MONGODB_URI
@@ -56,7 +57,8 @@ async def add_afk(user_id: int, details: dict):
 
 async def is_afk(user_id: int):
     try:
-        data = await afk_collection.find_one({"user_id": user_id})
+        # Safe match for both int and str user_id
+        data = await afk_collection.find_one({"user_id": {"$in": [user_id, str(user_id)]}})
         if data:
             return True, data
         return False, None
@@ -67,12 +69,43 @@ async def is_afk(user_id: int):
 
 async def remove_afk(user_id: int):
     try:
-        result = await afk_collection.delete_one({"user_id": user_id})
+        # Safe deletion for both int and str user_id
+        result = await afk_collection.delete_one({"user_id": {"$in": [user_id, str(user_id)]}})
         logger.debug(f"Removed AFK for user {user_id}: {result.deleted_count} doc(s)")
         return result.deleted_count > 0
     except Exception as e:
         logger.error(f"Failed to remove AFK for user {user_id}: {e}")
         return False
+
+
+async def remove_afk_by_target(target):
+    """Remove AFK by user_id (int/str) or username silently"""
+    query = []
+    try:
+        num_id = int(target)
+        query.append({"user_id": num_id})
+        query.append({"user_id": str(num_id)})
+    except (ValueError, TypeError):
+        pass
+
+    if isinstance(target, str):
+        clean_user = target.lstrip("@").strip()
+        if clean_user:
+            query.append({"username": {"$regex": f"^{re.escape(clean_user)}$", "$options": "i"}})
+
+    if not query:
+        return False, None
+
+    try:
+        doc = await afk_collection.find_one({"$or": query})
+        if not doc:
+            return False, None
+
+        result = await afk_collection.delete_one({"_id": doc["_id"]})
+        return result.deleted_count > 0, doc
+    except Exception as e:
+        logger.error(f"Failed to remove AFK by target {target}: {e}")
+        return False, None
 
 
 async def add_user(user_id: int, first_name: str = "", username: str = "", access_hash: int = 0):
